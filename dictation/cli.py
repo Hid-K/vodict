@@ -25,6 +25,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="имя (или часть имени) микрофона")
     parser.add_argument("--list-mics", action="store_true",
                         help="показать микрофоны и выйти")
+    parser.add_argument("--history", nargs="?", const=20, type=int, metavar="N",
+                        help="показать последние N записей истории диктовок и выйти")
     return parser
 
 
@@ -73,6 +75,23 @@ def _ensure_printable_console() -> None:
             pass
 
 
+def show_history(config, limit: int) -> int:
+    from .history import HistoryStore
+
+    rows = HistoryStore(config.history_dir or None).read_index(max(1, limit))
+    if not rows:
+        print("История пуста — сделайте первую диктовку.")
+        return 0
+    print(f"{'Время':<20} {'Сек':>6}  {'Модель':<24} {'Яз':<3} {'Статус':<8} Текст")
+    for r in rows:
+        seconds = r.get("seconds", 0.0)
+        print(f"{r.get('time', ''):<20} {seconds:>5.1f}  "
+              f"{r.get('model', ''):<24} {r.get('language', ''):<3} "
+              f"{r.get('status', ''):<8} {r.get('preview', '')}")
+    print(f"\nПоказано: {len(rows)}. Аудиозаписи: ~/Vodict/recordings/")
+    return 0
+
+
 def main(argv=None) -> int:
     _ensure_printable_console()
     args = build_parser().parse_args(argv)
@@ -83,6 +102,9 @@ def main(argv=None) -> int:
 
     config = Config.load(args.config)
     apply_overrides(config, args)
+
+    if args.history is not None:
+        return show_history(config, args.history)
 
     try:
         from .app import DictationController

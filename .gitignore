@@ -4,6 +4,7 @@ __pycache__/
 venv/
 .tmp-pip/
 .tmp-tests/
+.tmp-live/
 dist/
 build/
 *.egg-info/

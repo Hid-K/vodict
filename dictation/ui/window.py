@@ -19,12 +19,14 @@ import threading
 import time
 import tkinter as tk
 from dataclasses import replace
+from pathlib import Path
 from tkinter import messagebox, ttk
 
 from ..audio import sounds
 from ..audio.recorder import MicrophoneRecorder, list_input_devices
 from ..config import Config, default_config_path
 from ..engines.registry import available_engines
+from ..history import default_history_dir
 from ..hotkeys import key_token
 
 MODEL_SIZES = ["tiny", "base", "small", "medium", "large-v2", "large-v3", "large-v3-turbo"]
@@ -71,6 +73,19 @@ def pretty_hotkey(spec: str) -> str:
         else:
             parts.append(token.capitalize())
     return " + ".join(parts)
+
+
+def open_in_explorer(path: Path) -> None:
+    """Открыть папку в проводнике/Finder."""
+    path = Path(path)
+    if not path.exists():
+        path = path.parent
+    if sys.platform.startswith("win"):
+        os.startfile(path)  # noqa: S606
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", str(path)])
+    else:
+        subprocess.Popen(["xdg-open", str(path)])
 
 
 class DictationWindow:
@@ -139,6 +154,7 @@ class DictationWindow:
         ttk.Button(bottom, text="Микрофоны", command=self._show_mics).pack(
             side="left", padx=8
         )
+        ttk.Button(bottom, text="📜 История", command=self._show_history).pack(side="right")
 
     # ------------------------------------------------------------------
     def _hint_text(self) -> str:
@@ -251,6 +267,9 @@ class DictationWindow:
     def _open_settings(self) -> None:
         SettingsDialog(self.root, self.controller.config, self.controller)
 
+    def _show_history(self) -> None:
+        HistoryDialog(self.root, self.controller)
+
     def _show_mics(self) -> None:
         dialog = tk.Toplevel(self.root)
         dialog.title("Микрофоны")
@@ -276,6 +295,80 @@ class DictationWindow:
             text="Полный список также доступен во вкладке «Аудио» настроек.",
             foreground="#777777",
         ).pack(padx=10, pady=(0, 10))
+
+
+# ======================================================================
+# Диалог истории диктовок
+# ======================================================================
+class HistoryDialog(tk.Toplevel):
+    def __init__(self, master, controller) -> None:
+        super().__init__(master)
+        self.title("История диктовок")
+        self.geometry("880x420")
+        self.transient(master)
+        try:
+            self.grab_set()
+        except tk.TclError:
+            pass
+        self.controller = controller
+
+        frm = ttk.Frame(self, padding=10)
+        frm.pack(fill="both", expand=True)
+
+        columns = ("time", "sec", "model", "lang", "chars", "status", "text")
+        headers = {"time": "Время", "sec": "Сек", "model": "Модель",
+                   "lang": "Яз", "chars": "Симв.", "status": "Статус",
+                   "text": "Текст"}
+        widths = {"time": 145, "sec": 50, "model": 170, "lang": 35,
+                  "chars": 50, "status": 75, "text": 320}
+        self.tree = ttk.Treeview(frm, columns=columns, show="headings", height=16)
+        for col in columns:
+            self.tree.heading(col, text=headers[col])
+            self.tree.column(col, width=widths[col],
+                             stretch=(col == "text"), anchor="w")
+        vsb = ttk.Scrollbar(frm, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=vsb.set)
+        self.tree.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+        frm.rowconfigure(0, weight=1)
+        frm.columnconfigure(0, weight=1)
+
+        bottom = ttk.Frame(frm)
+        bottom.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        ttk.Button(bottom, text="⟳ Обновить", command=self._refresh).pack(side="left")
+        ttk.Button(bottom, text="📂 Открыть папку",
+                   command=lambda: open_in_explorer(self._history_dir())).pack(
+            side="left", padx=8)
+        ttk.Label(bottom, text=f"Хранение: {self._history_dir()}",
+                  foreground="#888888").pack(side="left", padx=(16, 0))
+
+        self._refresh()
+
+    def _history_dir(self):
+        history = self.controller.history
+        return history.root if history is not None else default_history_dir()
+
+    def _refresh(self) -> None:
+        self.tree.delete(*self.tree.get_children())
+        history = self.controller.history
+        if history is None:
+            self.tree.insert("", "end",
+                             values=("—", "", "", "", "", "",
+                                     "история отключена в настройках"))
+            return
+        status_ru = {"ok": "✓", "empty": "пусто", "insert_error": "ошибка вст.",
+                     "error": "ошибка"}
+        for r in history.read_index(100):
+            status = status_ru.get(r.get("status", ""), r.get("status", ""))
+            self.tree.insert("", "end", values=(
+                r.get("time", ""),
+                f"{float(r.get('seconds', 0)):.1f}",
+                r.get("model", ""),
+                r.get("language", ""),
+                r.get("chars", 0),
+                status,
+                r.get("preview", ""),
+            ))
 
 
 # ======================================================================
@@ -583,6 +676,20 @@ class SettingsDialog(tk.Toplevel):
         ttk.Button(btns, text="▸ Прослушать конец",
                    command=sounds.beep_end).pack(side="left", padx=(8, 0))
 
+        holder = self._row(f, "История диктовок")
+        self.history_var = tk.BooleanVar()
+        ttk.Checkbutton(holder, text="Сохранять тексты и метаданные",
+                        variable=self.history_var).pack(anchor="w")
+        self.save_audio_var = tk.BooleanVar()
+        ttk.Checkbutton(holder, text="Сохранять аудиозаписи (wav)",
+                        variable=self.save_audio_var).pack(anchor="w")
+        self.historydir_var = tk.StringVar()
+        ttk.Entry(holder, textvariable=self.historydir_var, width=36).pack(
+            anchor="w", pady=(2, 0)
+        )
+        ttk.Label(holder, text=f"пусто = {default_history_dir()}",
+                  foreground="#888888").pack(anchor="w")
+
         holder = self._row(f, "Режим работы")
         self.tray_var = tk.BooleanVar()
         ttk.Checkbutton(holder, text="Запускать свёрнутым в трей (работа в фоне)",
@@ -642,6 +749,9 @@ class SettingsDialog(tk.Toplevel):
         self.apimodel_var.set(cfg.api_model)
         self.sound_var.set(cfg.sound_enabled)
         self.tray_var.set(cfg.start_in_tray)
+        self.history_var.set(cfg.history_enabled)
+        self.save_audio_var.set(cfg.save_audio)
+        self.historydir_var.set(cfg.history_dir)
         self.topmost_var.set(cfg.always_on_top)
 
     def _reset_defaults(self) -> None:
@@ -773,17 +883,7 @@ class SettingsDialog(tk.Toplevel):
     # ------------------------------------------------------------------
     # служебное
     def _open_config_folder(self) -> None:
-        path = default_config_path()
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-        except OSError:
-            pass
-        if sys.platform.startswith("win"):
-            os.startfile(path.parent)  # noqa: S606
-        elif sys.platform == "darwin":
-            subprocess.Popen(["open", str(path.parent)])
-        else:
-            subprocess.Popen(["xdg-open", str(path.parent)])
+        open_in_explorer(default_config_path())
 
     def _cancel(self) -> None:
         if self._capturing is not None:
@@ -839,6 +939,9 @@ class SettingsDialog(tk.Toplevel):
                 api_model=self.apimodel_var.get().strip() or "whisper-1",
                 sound_enabled=bool(self.sound_var.get()),
                 start_in_tray=bool(self.tray_var.get()),
+                history_enabled=bool(self.history_var.get()),
+                save_audio=bool(self.save_audio_var.get()),
+                history_dir=self.historydir_var.get().strip(),
                 always_on_top=bool(self.topmost_var.get()),
             )
         except ValueError as exc:

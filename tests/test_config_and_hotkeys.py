@@ -108,6 +108,53 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(device_values, {"auto", "cpu", "cuda"})
 
 
+@_SKIP_FS
+class HistoryStoreTests(unittest.TestCase):
+    def test_roundtrip_and_index(self):
+        import numpy as np
+
+        from dictation.history import HistoryStore
+
+        with tmp_dir() as tmp:
+            store = HistoryStore(Path(tmp) / "Vodict")
+            audio = (np.sin(np.linspace(0, 100, 1600)).astype(np.float32) * 0.1)
+            meta = store.begin_entry(audio, 16000, save_audio=True)
+            self.assertTrue((Path(tmp) / "Vodict" / meta["audio_file"]).exists())
+            meta.update({
+                "time": "2026-01-01 12:00:00",
+                "microphone": "default",
+                "engine": "faster-whisper",
+                "model": "small",
+                "language_requested": "ru",
+                "status": "ok",
+                "text": "привет мир",
+            })
+            store.write_entry(meta)
+            store.write_entry({**meta, "id": meta["id"] + "_2",
+                               "audio_file": None, "status": "empty", "text": ""})
+
+            rows = store.read_index(10)
+            self.assertEqual(len(rows), 2)
+            self.assertEqual(rows[0]["id"], meta["id"] + "_2")  # свежие сверху
+            ok_row = rows[1]
+            self.assertEqual(ok_row["status"], "ok")
+            self.assertEqual(ok_row["chars"], len("привет мир"))
+            self.assertEqual(ok_row["preview"], "привет мир")
+            self.assertTrue(ok_row["has_audio"])
+            self.assertTrue(ok_row["model"].startswith("faster-whisper:"))
+            # полный JSON записи тоже на месте
+            entry_json = (Path(tmp) / "Vodict" / "entries"
+                          / f"{meta['id']}.json")
+            self.assertTrue(entry_json.exists())
+
+    def test_read_index_empty(self):
+        from dictation.history import HistoryStore
+
+        with tmp_dir() as tmp:
+            store = HistoryStore(Path(tmp))
+            self.assertEqual(store.read_index(10), [])
+
+
 @unittest.skipIf(find_spec("pynput") is None, "pynput не установлен")
 class HotkeyTests(unittest.TestCase):
     def test_parse_combo(self):

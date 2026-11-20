@@ -13,14 +13,16 @@
 from __future__ import annotations
 
 import queue
+import sys
 import threading
 import time
 
 from .audio.recorder import MicrophoneRecorder, ensure_rate
 from .audio import sounds
 from .config import Config
-from .engines.base import EngineUnavailable
+from .engines.base import EngineUnavailable, TranscriptionResult
 from .engines.registry import create_engine
+from .history import HistoryStore
 from .hotkeys import HotkeyListener
 from .output import create_inserter
 from .platform import create_platform_support
@@ -61,6 +63,10 @@ class DictationController:
         self.hotkey = HotkeyListener(
             config.hotkey, self._on_hotkey_event, mode=_safe_mode(config.hotkey_mode)
         )
+        self.history = (HistoryStore(config.history_dir or None)
+                        if config.history_enabled else None)
+        self._pending_history: dict | None = None
+        self._record_started: float | None = None
         self.ui = None
         self.tray = None
 
@@ -115,6 +121,7 @@ class DictationController:
                 self._post("error", f"Не удалось начать запись: {exc}")
                 return
             self.state = STATE_RECORDING
+            self._record_started = time.time()
             if self.config.sound_enabled:
                 sounds.beep_start()
         self._post("state", STATE_RECORDING)
@@ -133,6 +140,7 @@ class DictationController:
             self.state = STATE_TRANSCRIBING
             if self.config.sound_enabled:
                 sounds.beep_end()
+            self._pending_history = self._begin_history(audio, rate)
         self._post("state", STATE_TRANSCRIBING)
         threading.Thread(
             target=self._transcribe_and_insert, args=(audio, rate), daemon=True
@@ -162,13 +170,24 @@ class DictationController:
                     low_since = None
 
     # ------------------------------------------------------------------
-    # распознавание + вставка
+    # распознавание + вставка + история
     def _transcribe_and_insert(self, audio, rate) -> None:
+        pending = self._pending_history
+        self._pending_history = None
+        target = None
+        transcribe_seconds = 0.0
         try:
-            text = self._recognize(audio, rate)
+            t0 = time.perf_counter()
+            result = self._recognize(audio, rate)
+            transcribe_seconds = time.perf_counter() - t0
+            text = (result.text or "").strip()
+
             if not text:
                 self._set_state(STATE_IDLE, "Речь не распознана")
+                self._finish_history(pending, status="empty", result=result,
+                                     transcribe_seconds=transcribe_seconds)
                 return
+
             target = self.focus.resolve_target()
             # На время вставки глушим слушатель хоткея: инжектированные
             # Ctrl+V не должны путать состояние комбинации (например,
@@ -180,9 +199,15 @@ class DictationController:
                 self._set_state(STATE_IDLE)
                 self._post("result", text)
                 self._post("error", f"Не удалось вставить текст: {exc}")
+                self._finish_history(pending, status="insert_error", text=text,
+                                     result=result,
+                                     transcribe_seconds=transcribe_seconds,
+                                     target_title=self._target_title(target),
+                                     error=str(exc))
                 return
             finally:
                 self.hotkey.set_paused(False)
+
             if target is None:
                 self._set_state(
                     STATE_IDLE, "Целевое окно не определено — текст остался в буфере"
@@ -190,18 +215,76 @@ class DictationController:
             else:
                 self._set_state(STATE_IDLE, "Вставлено ✓")
             self._post("result", text)
+            self._finish_history(pending, status="ok", text=text, result=result,
+                                 transcribe_seconds=transcribe_seconds,
+                                 target_title=self._target_title(target))
         except EngineUnavailable as exc:
             self._set_state(STATE_IDLE)
             self._post("error", str(exc))
+            self._finish_history(pending, status="error", result=result,
+                                 transcribe_seconds=transcribe_seconds,
+                                 error=str(exc))
         except Exception as exc:
             self._set_state(STATE_IDLE)
             self._post("error", f"Ошибка распознавания: {exc}")
+            self._finish_history(pending, status="error", result=result,
+                                 transcribe_seconds=transcribe_seconds,
+                                 error=str(exc))
 
-    def _recognize(self, audio, rate) -> str:
+    @staticmethod
+    def _target_title(target) -> str | None:
+        return getattr(target, "title", None) if target is not None else None
+
+    def _begin_history(self, audio, rate) -> dict | None:
+        """Сохраняет wav и формирует стартовые метаданные записи истории."""
+        if self.history is None:
+            return None
+        try:
+            meta = self.history.begin_entry(audio, rate,
+                                            save_audio=self.config.save_audio)
+        except Exception as exc:
+            print(f"[history] Не удалось сохранить запись: {exc}", file=sys.stderr)
+            return None
+        model = (self.config.api_model if self.config.engine == "openai-api"
+                 else self.config.model_size)
+        meta.update({
+            "time": time.strftime(
+                "%Y-%m-%d %H:%M:%S",
+                time.localtime(self._record_started or time.time()),
+            ),
+            "microphone": self.config.microphone or "default",
+            "engine": self.config.engine,
+            "model": model,
+            "language_requested": self.config.language,
+        })
+        return meta
+
+    def _finish_history(self, pending: dict | None, status: str, text: str = "",
+                        result: TranscriptionResult | None = None,
+                        transcribe_seconds: float = 0.0,
+                        target_title: str | None = None,
+                        error: str | None = None) -> None:
+        if self.history is None or pending is None:
+            return
+        meta = dict(pending)
+        meta.update({
+            "status": status,  # ok | empty | insert_error | error
+            "text": text,
+            "language_detected": getattr(result, "language", None),
+            "language_probability": getattr(result, "language_probability", None),
+            "transcribe_seconds": round(transcribe_seconds, 2),
+            "target_title": target_title,
+            "error": error,
+        })
+        try:
+            self.history.write_entry(meta)
+        except Exception as exc:
+            print(f"[history] Не удалось записать историю: {exc}", file=sys.stderr)
+
+    def _recognize(self, audio, rate) -> TranscriptionResult:
         audio16 = ensure_rate(audio, rate)
         engine = self._get_engine()
-        result = engine.transcribe(audio16, 16000)
-        return (result.text or "").strip()
+        return engine.transcribe(audio16, 16000)
 
     def _get_engine(self):
         with self._engine_lock:
@@ -252,6 +335,10 @@ class DictationController:
             new_config.microphone != self.config.microphone
             or new_config.sample_rate != self.config.sample_rate
         )
+        history_changed = (
+            new_config.history_enabled != self.config.history_enabled
+            or new_config.history_dir != self.config.history_dir
+        )
 
         self.config = new_config
         try:
@@ -262,6 +349,9 @@ class DictationController:
         if mic_changed:
             self.recorder.device = new_config.microphone or None
             self.recorder.requested_rate = new_config.sample_rate
+        if history_changed:
+            self.history = (HistoryStore(new_config.history_dir or None)
+                            if new_config.history_enabled else None)
         self.inserter = create_inserter(new_config, self.focus, self.support)
 
         if engine_changed:

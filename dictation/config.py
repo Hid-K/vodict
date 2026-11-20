@@ -88,6 +88,11 @@ class Config:
     sound_enabled: bool = True       # звуковые сигналы начала/конца записи
     always_on_top: bool = True
 
+    # --- история диктовок -----------------------------------------------------
+    history_enabled: bool = True     # сохранять тексты и метаданные
+    save_audio: bool = True          # сохранять wav-записи голоса
+    history_dir: str = ""            # пусто = ~/Vodict
+
     # -----------------------------------------------------------------------
     @classmethod
     def load(cls, path: str | Path | None = None) -> "Config":
