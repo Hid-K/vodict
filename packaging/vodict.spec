@@ -7,6 +7,7 @@ macOS:   .app-бандл в COLLECT (консоли нет — логи в фа�
 
 Локальная сборка:  pyinstaller --noconfirm packaging/vodict.spec
 """
+import importlib.util
 import os
 import sys
 from PyInstaller.utils.hooks import collect_all, collect_data_files
@@ -51,6 +52,18 @@ for pkg in PACKAGES:
 # PyInstaller) и кладём весь пакет как data-файлы: в onedir-сборке модуль
 # импортируется с диска (_internal), DLL попадают вместе с пакетом.
 datas += collect_data_files("onnxruntime", include_py_files=True)
+
+# НО: collect_data_files пропускает бинарники (.pyd/.dll), а без
+# onnxruntime_pybind11_state.pyd VAD-фильтр faster-whisper не работает.
+# Добавляем расширения capi как бинарники с сохранением пути в пакете.
+_ort_spec = importlib.util.find_spec("onnxruntime")
+if _ort_spec and _ort_spec.submodule_search_locations:
+    _ort_capi = os.path.join(list(_ort_spec.submodule_search_locations)[0], "capi")
+    for _f in os.listdir(_ort_capi):
+        if _f.endswith(".pyd"):
+            binaries.append(
+                (os.path.join(_ort_capi, _f), os.path.join("onnxruntime", "capi"))
+            )
 
 hiddenimports += [
     "tkinter",
