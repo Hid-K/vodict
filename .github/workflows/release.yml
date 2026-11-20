@@ -72,8 +72,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           VERSION: ${{ github.event.release.tag_name || inputs.tag || github.ref_name }}
         run: |
-          gh release upload "$VERSION" --clobber `
-            Vodict-windows-*.zip Vodict-setup-*.exe
+          gh release upload "$VERSION" --clobber Vodict-windows-*.zip Vodict-setup-*.exe
           count=$(gh release view "$VERSION" --json assets --jq '.assets | length')
           echo "файлов на релизе: $count"
           if [ "$count" -lt 2 ]; then
