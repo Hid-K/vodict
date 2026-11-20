@@ -110,9 +110,10 @@ exe = EXE(
     debug=False,
     strip=False,
     upx=False,
-    # На macOS консоли нет (.app); на Windows консоль оставляем —
-    # там видны логи при тестировании.
-    console=not is_mac,
+    # Консольное окно не нужно: логи — в файл (logs/app.log) и в
+    # диагностику. CLI-флаги (--list-mics и т.п.) печатает только запуск
+    # из исходников; в собранном exe используйте 🩺/файл лога.
+    console=False,
 )
 
 coll = COLLECT(

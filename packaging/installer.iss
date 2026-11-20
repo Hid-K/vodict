@@ -35,7 +35,7 @@ Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; \
     GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 Name: "autostart"; Description: "Запускать при входе в Windows"; \
-    GroupDescription: "Автозапуск:"; Flags: unchecked
+    GroupDescription: "Автозапуск:"
 
 [Files]
 Source: "..\dist\Vodict\*"; DestDir: "{app}"; \

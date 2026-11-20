@@ -42,6 +42,8 @@ DEVICES = [("auto", "auto"), ("CPU", "cpu"), ("CUDA (NVIDIA)", "cuda")]
 COMPUTES = [("auto", "auto"), ("int8 — быстро на CPU", "int8"),
             ("int8_float16", "int8_float16"), ("float16 — GPU", "float16"),
             ("float32 — точно", "float32")]
+BEAMS = [("1 — быстрее", "1"), ("2", "2"), ("3", "3"),
+         ("5 — по умолчанию", "5"), ("8 — точнее", "8")]
 DEFAULT_MIC = "(по умолчанию)"
 
 _STATE_TEXT = {
@@ -633,9 +635,10 @@ class SettingsDialog(tk.Toplevel):
         ttk.Combobox(holder, textvariable=self.compute_var, state="readonly",
                      values=[lbl for lbl, _ in COMPUTES], width=36).pack(fill="x")
 
-        holder = self._row(f, "Beam size (точность)")
+        holder = self._row(f, "Beam size (точность/скорость)")
         self.beam_var = tk.StringVar()
-        ttk.Entry(holder, textvariable=self.beam_var, width=10).pack(side="left")
+        ttk.Combobox(holder, textvariable=self.beam_var, state="readonly",
+                     values=[lbl for lbl, _ in BEAMS], width=24).pack(side="left")
 
         holder = self._row(f, "")
         self.vad_var = tk.BooleanVar()
@@ -966,7 +969,9 @@ class SettingsDialog(tk.Toplevel):
                                  "auto"))
         self.compute_var.set(next((lbl for lbl, val in COMPUTES
                                    if val == cfg.compute_type), "auto"))
-        self.beam_var.set(str(cfg.beam_size))
+        self.beam_var.set(next((lbl for lbl, val in BEAMS
+                                if val == str(cfg.beam_size)),
+                               "5 — по умолчанию"))
         self.vad_var.set(cfg.vad_filter)
         self.prompt_var.set(cfg.initial_prompt)
 
@@ -1173,7 +1178,7 @@ class SettingsDialog(tk.Toplevel):
                 language=self._rev(LANGS, self.lang_var.get(), ""),
                 device=self._rev(DEVICES, self.device_var.get(), "auto"),
                 compute_type=self._rev(COMPUTES, self.compute_var.get(), "auto"),
-                beam_size=self._num(self.beam_var.get, "Beam size", int, 1, 8),
+                beam_size=int(self._rev(BEAMS, self.beam_var.get(), "5")),
                 vad_filter=bool(self.vad_var.get()),
                 initial_prompt=self.prompt_var.get().strip(),
                 hotkey=self.hotkey_var.get().strip() or "ctrl+alt",

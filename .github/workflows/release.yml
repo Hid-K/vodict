@@ -63,6 +63,16 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Сборка инсталлятора (ISCC) завершилась с ошибкой" }
           Get-Item "dist/installer/Vodict-setup-*.exe"
 
+      - name: Контрольные суммы (SHA256)
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem "Vodict-windows-*.zip", "dist/installer/Vodict-setup-*.exe"
+          $lines = foreach ($f in $files) {
+            "$((Get-FileHash $f.FullName -Algorithm SHA256).Hash.ToLower())  $($f.Name)"
+          }
+          $lines | Set-Content SHA256SUMS.txt
+          Get-Content SHA256SUMS.txt
+
       # TODO: сборка macOS (.app -> .dmg) — отложено
 
       - name: Прикрепить к релизу
@@ -81,7 +91,7 @@ jobs:
           ls -la Vodict-windows-*.zip dist/installer/Vodict-setup-*.exe || true
           gh --version
           gh auth status
-          if ! gh release upload "$VERSION" --clobber Vodict-windows-*.zip dist/installer/Vodict-setup-*.exe; then
+          if ! gh release upload "$VERSION" --clobber Vodict-windows-*.zip dist/installer/Vodict-setup-*.exe SHA256SUMS.txt; then
             echo "::error::gh release upload завершился с ошибкой — см. вывод выше"
             exit 1
           fi
@@ -100,3 +110,4 @@ jobs:
           path: |
             Vodict-windows-*.zip
             dist/installer/Vodict-setup-*.exe
+            SHA256SUMS.txt
