@@ -54,11 +54,14 @@ jobs:
       - name: Инсталлятор (Inno Setup, обновление поверх старой версии)
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           choco install innosetup -y --no-progress
+          if ($LASTEXITCODE -ne 0) { throw "choco install innosetup failed" }
           $iscc = Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { throw "ISCC не найден: $iscc" }
           & $iscc /DMyAppVersion=$env:VERSION packaging/installer.iss
-          Get-Item "dist/installer/Vodict-setup-*.exe" |
-            Select-Object Name, Length
+          if ($LASTEXITCODE -ne 0) { throw "Сборка инсталлятора (ISCC) завершилась с ошибкой" }
+          Get-Item "dist/installer/Vodict-setup-*.exe"
 
       # TODO: сборка macOS (.app -> .dmg) — отложено
 
@@ -75,10 +78,10 @@ jobs:
           set -x
           echo "VERSION=$VERSION"
           echo "GH_REPO=$GH_REPO"
-          ls -la Vodict-windows-*.zip Vodict-setup-*.exe
+          ls -la Vodict-windows-*.zip dist/installer/Vodict-setup-*.exe || true
           gh --version
           gh auth status
-          if ! gh release upload "$VERSION" --clobber Vodict-windows-*.zip Vodict-setup-*.exe; then
+          if ! gh release upload "$VERSION" --clobber Vodict-windows-*.zip dist/installer/Vodict-setup-*.exe; then
             echo "::error::gh release upload завершился с ошибкой — см. вывод выше"
             exit 1
           fi
@@ -96,4 +99,4 @@ jobs:
           name: Vodict-build-${{ env.VERSION }}
           path: |
             Vodict-windows-*.zip
-            Vodict-setup-*.exe
+            dist/installer/Vodict-setup-*.exe
