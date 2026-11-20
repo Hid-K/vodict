@@ -262,13 +262,21 @@ class DownloadManager:
                 self._emit("progress", {"model": model, "percent": 100.0})
                 self._emit("done", {"model": model})
             except Exception as exc:
+                error = str(exc)
+                if "401" in error or "403" in error:
+                    # Лимит анонимных запросов HuggingFace: лечится
+                    # бесплатным read-токеном (переменная HF_TOKEN).
+                    error += (" — возможно, сработал лимит анонимных запросов "
+                              "HuggingFace. Решение: создайте бесплатный "
+                              "read-токен на hf.co/settings/tokens и задайте "
+                              "переменную окружения HF_TOKEN, затем повторите")
                 with self._lock:
                     st = self._states.get(model)
                     if st:
                         st["state"] = "error"
                         st["progress"] = None
-                        st["error"] = str(exc)
-                self._emit("error", {"model": model, "error": str(exc)})
+                        st["error"] = error
+                self._emit("error", {"model": model, "error": error})
 
     def _emit(self, kind: str, payload: dict) -> None:
         if self.on_event is None:
