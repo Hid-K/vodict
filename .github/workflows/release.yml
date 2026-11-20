@@ -1,10 +1,13 @@
 name: Release builds
 
 # Сборка дистрибутивов и прикрепление к релизу.
-# Публикуйте релиз (github.com -> Releases -> New release) — соберётся
-# и приложится архив с Vodict.exe.
-# Можно запустить и вручную (workflow_dispatch) — тогда билд уйдёт
-# в артефакты запуска, а не в релиз.
+#
+# Два способа запуска:
+# 1) Публикация релиза на GitHub (релиз с тегом, например v0.1.0) —
+#    соберёт Vodict-windows-<тег>.zip и Vodict-setup-<тег>.exe и
+#    автоматически прикрепит их к релизу.
+# 2) Вручную (workflow_dispatch): билд уйдёт в артефакты; если заполнить
+#    «tag» — файлы прикрепятся к указанному существующему релизу.
 #
 # TODO: сборка macOS (.app -> .dmg) — отложена, займёмся отдельно.
 
@@ -12,15 +15,21 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Тег существующего релиза для прикрепления файлов (пусто = не прикреплять)"
+        required: false
+        default: ""
 
 permissions:
   contents: write
 
+env:
+  VERSION: ${{ github.event.release.tag_name || inputs.tag || github.ref_name }}
+
 jobs:
   build-windows:
     runs-on: windows-latest
-    env:
-      VERSION: ${{ github.event.release.tag_name || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
 
@@ -54,19 +63,20 @@ jobs:
       # TODO: сборка macOS (.app -> .dmg) — отложено
 
       - name: Прикрепить к релизу
-        if: github.event_name == 'release'
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            Vodict-windows-*.zip
-            Vodict-setup-*.exe
-          fail_on_unmatched_files: true
+        if: github.event_name == 'release' || inputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release upload "$VERSION" --clobber `
+            Vodict-windows-*.zip Vodict-setup-*.exe
+          gh release view "$VERSION" --json assets `
+            --jq '.assets[] | .name + " (" + (.size|tostring) + " байт)"'
 
-      - name: Артефакт (вне релиза)
-        if: github.event_name != 'release'
+      - name: Артефакт (всегда, для тестов)
         uses: actions/upload-artifact@v4
         with:
-          name: Vodict-windows
+          name: Vodict-build-${{ env.VERSION }}
           path: |
             Vodict-windows-*.zip
             Vodict-setup-*.exe
