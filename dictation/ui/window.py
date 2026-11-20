@@ -28,6 +28,7 @@ from ..config import Config, default_config_path
 from ..engines.registry import available_engines
 from ..history import default_history_dir
 from ..hotkeys import key_token
+from ..notifications import notify_model_downloaded, notify_system
 
 MODEL_SIZES = ["tiny", "base", "small", "medium", "large-v2", "large-v3", "large-v3-turbo"]
 LANGS = [("(автоопределение)", ""), ("Русский", "ru"), ("English", "en"),
@@ -251,11 +252,25 @@ class DictationWindow:
         elif kind == "model_download_done":
             model = event[1]
             self.status_var.set(f"Модель {model} загружена ✓")
-            self.controller.tray.notify(
-                "Модель загружена ✓",
-                f"{model} готова к использованию. Переключиться: меню иконки "
-                "в трее → «Переключить модель», или в Настройках.",
+            # Windows: тост с кнопкой «Переключиться»; macOS: нативное
+            # уведомление. Переключение идёт через очередь событий, чтобы
+            # apply_settings выполнялся в главном потоке.
+            shown = notify_model_downloaded(
+                model,
+                on_switch=lambda m=model: self.controller.events.put(
+                    ("switch_model", m)
+                ),
             )
+            if not shown:
+                tray = self.controller.tray
+                if tray is not None and tray.notify(
+                        "Модель загружена ✓",
+                        f"{model} готова. Переключиться: меню иконки "
+                        "в трее → «Переключить модель», или в Настройках."):
+                    return
+                messagebox.showinfo("Модель загружена",
+                                    f"«{model}» готова к использованию.",
+                                    parent=self.root)
         elif kind == "model_download_error":
             model = event[1]
             err = event[2] if len(event) > 2 else ""
@@ -289,8 +304,9 @@ class DictationWindow:
         )
 
     def _notify_or_dialog(self, title: str, message: str) -> None:
-        """Системное уведомление через иконку трея; если трей недоступен —
-        обычное окно с ошибкой."""
+        # Сначала macOS-/osascript-уведомление, затем трей, затем окно.
+        if notify_system(title, message):
+            return
         tray = self.controller.tray
         if tray is not None and tray.notify(title, message):
             return
