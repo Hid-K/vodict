@@ -22,6 +22,7 @@ from .audio import sounds
 from .config import Config
 from .engines.base import EngineUnavailable, TranscriptionResult
 from .engines.registry import create_engine
+from .downloads import DownloadManager
 from .history import HistoryStore
 from .hotkeys import HotkeyListener
 from .output import create_inserter
@@ -65,6 +66,7 @@ class DictationController:
         )
         self.history = (HistoryStore(config.history_dir or None)
                         if config.history_enabled else None)
+        self.downloads = DownloadManager(on_event=self._on_download_event)
         self._pending_history: dict | None = None
         self._record_started: float | None = None
         self.ui = None
@@ -168,6 +170,29 @@ class DictationController:
                         return
                 else:
                     low_since = None
+
+    def request_model_download(self, model: str) -> str:
+        """Запустить загрузку модели faster-whisper.
+
+        Возвращает "cached" | "already" | "started" | "na" (для движков
+        без скачиваемых моделей).
+        """
+        if self.config.engine != "faster-whisper":
+            return "na"
+        return self.downloads.request_download(model)
+
+    def _on_download_event(self, kind: str, payload: dict) -> None:
+        """События менеджера загрузок -> очередь событий UI."""
+        model = payload.get("model", "")
+        if kind == "started":
+            self._post("model_download_started", model)
+        elif kind == "progress":
+            self._post("model_download_progress", model, payload.get("percent"))
+        elif kind == "done":
+            self._post("model_download_done", model)
+        elif kind == "error":
+            self._post("model_download_error", model,
+                       payload.get("error", "неизвестная ошибка"))
 
     # ------------------------------------------------------------------
     # распознавание + вставка + история
@@ -289,6 +314,10 @@ class DictationController:
     def _get_engine(self):
         with self._engine_lock:
             if self.engine is None:
+                # Если модель качается менеджером загрузок — ждём её,
+                # чтобы не начать параллельную (дублирующую) загрузку.
+                if self.config.engine == "faster-whisper":
+                    self.downloads.wait_until_cached(self.config.model_size)
                 self._post("status", "Загрузка модели (первый запуск может занять пару минут)…")
                 self.engine = create_engine(
                     self.config.engine, **self._engine_options()

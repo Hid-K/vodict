@@ -6,4 +6,5 @@ pyperclip>=1.8.2
 platformdirs>=4.0.0
 pystray>=0.19.5
 pillow>=10.0.0
+tqdm>=4.60
 pyobjc-framework-Cocoa>=10.0; sys_platform == "darwin"

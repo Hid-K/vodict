@@ -239,6 +239,24 @@ class DictationWindow:
             self._open_settings()
         elif kind == "quit":
             self._quit()
+        elif kind == "model_download_started":
+            self.status_var.set(f"Загрузка модели {payload}…")
+        elif kind == "model_download_progress":
+            model = event[1]
+            pct = event[2] if len(event) > 2 else None
+            self.status_var.set(f"Загрузка модели {model}: "
+                                + (f"{pct:.0f}%" if pct is not None else "подготовка…"))
+        elif kind == "model_download_done":
+            model = event[1]
+            self.status_var.set(f"Модель {model} загружена ✓")
+            DownloadToast(self.root, model,
+                          on_switch=lambda m=model: self._switch_model(m))
+        elif kind == "model_download_error":
+            model = event[1]
+            err = event[2] if len(event) > 2 else ""
+            self.status_var.set(f"Ошибка загрузки модели {model}")
+            messagebox.showerror("Загрузка модели", f"{model}: {err}",
+                                 parent=self.root)
 
     # ------------------------------------------------------------------
     def _on_close(self) -> None:
@@ -259,6 +277,12 @@ class DictationWindow:
         if tray is not None:
             tray.stop()
         self.root.destroy()
+
+    def _switch_model(self, model: str) -> None:
+        """Кнопка в уведомлении: сразу переключиться на новую модель."""
+        self.controller.apply_settings(
+            replace(self.controller.config, model_size=model)
+        )
 
     def run(self) -> None:
         self.root.mainloop()
@@ -372,6 +396,52 @@ class HistoryDialog(tk.Toplevel):
 
 
 # ======================================================================
+# Уведомление о завершении загрузки модели
+# ======================================================================
+class DownloadToast(tk.Toplevel):
+    """Небольшое окно в правом нижнем углу: «модель загружена» + кнопка
+    немедленного переключения. Закрывается кнопкой или само через 60 с."""
+
+    def __init__(self, master, model: str, on_switch) -> None:
+        super().__init__(master)
+        self.overrideredirect(True)
+        self.attributes("-topmost", True)
+
+        border = tk.Frame(self, background="#1e88e5", padx=2, pady=2)
+        border.pack()
+        inner = tk.Frame(border, background="white", padx=14, pady=10)
+        inner.pack()
+        tk.Label(inner, text=f"Модель «{model}» загружена ✓",
+                 background="white", foreground="#222222",
+                 font=("", 10, "bold")).pack(anchor="w")
+        row = tk.Frame(inner, background="white")
+        row.pack(fill="x", pady=(8, 0))
+
+        def do_switch() -> None:
+            self.destroy()
+            on_switch()
+
+        ttk.Button(row, text=f"Переключиться на {model}",
+                   command=do_switch).pack(side="left")
+        ttk.Button(row, text="Позже", command=self.destroy).pack(
+            side="left", padx=(8, 0)
+        )
+
+        self.update_idletasks()
+        sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
+        w = max(self.winfo_reqwidth(), 360)
+        h = self.winfo_reqheight()
+        self.geometry(f"{w}x{h}+{sw - w - 24}+{sh - h - 64}")
+        self.after(60000, self._auto_close)
+
+    def _auto_close(self) -> None:
+        try:
+            self.destroy()
+        except tk.TclError:
+            pass
+
+
+# ======================================================================
 # Запись комбинации клавиш с клавиатуры
 # ======================================================================
 class HotkeyCapture:
@@ -446,7 +516,10 @@ class SettingsDialog(tk.Toplevel):
         self._build()
         self._load(config)
         self.protocol("WM_DELETE_WINDOW", self._cancel)
+        self._active_model = config.model_size
+        self._last_labels = self._model_labels()
         self.after(60, self._acquire_grab)
+        self.after(300, self._poll_downloads)
 
     def _acquire_grab(self) -> None:
         """Захват ввода после того, как окно реально показалось
@@ -520,8 +593,17 @@ class SettingsDialog(tk.Toplevel):
 
         holder = self._row(f, "Модель Whisper")
         self.model_var = tk.StringVar()
-        ttk.Combobox(holder, textvariable=self.model_var,
-                     values=MODEL_SIZES, width=36).pack(fill="x")
+        self.model_cb = ttk.Combobox(holder, textvariable=self.model_var,
+                                     values=self._model_labels(), width=36)
+        self.model_cb.pack(fill="x")
+        self.model_cb.bind("<<ComboboxSelected>>", self._on_model_selected)
+
+        # Прогресс загрузки новой модели (скрыт, пока ничего не качается)
+        self.dl_box = ttk.Frame(holder)
+        self.dl_label = tk.Label(self.dl_box, text="", fg="#1e88e5")
+        self.dl_bar = ttk.Progressbar(self.dl_box, maximum=100)
+        self.dl_label.pack(anchor="w", pady=(4, 0))
+        self.dl_bar.pack(fill="x", pady=(2, 0))
 
         holder = self._row(f, "Язык речи")
         self.lang_var = tk.StringVar()
@@ -553,7 +635,103 @@ class SettingsDialog(tk.Toplevel):
 
         self._note(f, "Модель скачивается автоматически при первом использовании "
                       "размера. «small» — разумный баланс; «large-v3» — максимум "
-                      "качества (медленнее).")
+                      "качества (медленнее). Выберите ещё не загруженную модель — "
+                      "начнётся загрузка с прогрессом.")
+
+    # ------------------------------------------------------------------
+    # статусы моделей faster-whisper: кэш / загрузка с прогрессом
+    def _downloads_active(self):
+        if self.controller.config.engine != "faster-whisper":
+            return None
+        return self.controller.downloads
+
+    def _model_suffix(self, model: str, mgr) -> str:
+        st = mgr.state(model)
+        if st and st["state"] == "downloading":
+            p = st.get("progress")
+            return f" ⬇ {p:.0f}%" if p is not None else " ⬇ …"
+        if st and st["state"] == "error":
+            return " ⚠ ошибка"
+        if mgr.is_cached(model):
+            return ""
+        return " ⤓ не загружена"
+
+    def _model_labels(self) -> list[str]:
+        mgr = self._downloads_active()
+        if mgr is None:
+            return list(MODEL_SIZES)
+        return [m + self._model_suffix(m, mgr) for m in MODEL_SIZES]
+
+    @staticmethod
+    def _model_from_label(label: str) -> str:
+        """«large-v3 ⬇ 45%» -> «large-v3»; произвольный текст — как есть."""
+        for marker in (" ⤓", " ⬇", " ✓", " ⚠"):
+            i = label.find(marker)
+            if i > 0:
+                return label[:i].strip()
+        return label.strip()
+
+    def _on_model_selected(self, event=None) -> None:
+        model = self._model_from_label(self.model_var.get())
+        mgr = self._downloads_active()
+        if mgr is None:
+            return
+        st = mgr.state(model)
+        if st and st["state"] == "downloading":
+            p = st.get("progress")
+            pct = f"{p:.0f}% " if p is not None else ""
+            messagebox.showinfo(
+                "Загрузка модели",
+                f"«{model}» уже загружается ({pct}— подождите завершения, "
+                "затем её можно будет выбрать).",
+                parent=self,
+            )
+            self.model_var.set(self._active_model)
+            return
+        result = self.controller.request_model_download(model)
+        if result == "started":
+            # Модель недоступна, пока качается — возвращаем активную,
+            # прогресс виден ниже; по завершении предложим переключиться.
+            self.model_var.set(self._active_model)
+            self.model_cb["values"] = self._model_labels()
+            messagebox.showinfo(
+                "Загрузка модели",
+                f"Начал загрузку «{model}». Прогресс — под списком моделей; "
+                "по завершении появится предложение переключиться на неё.",
+                parent=self,
+            )
+        # result == "cached" — обычный выбор; применится кнопкой «Сохранить»
+
+    def _poll_downloads(self) -> None:
+        if not self.winfo_exists():
+            return
+        try:
+            mgr = self._downloads_active()
+            downloading = None
+            if mgr is not None:
+                for m, st in mgr.states().items():
+                    if st.get("state") == "downloading":
+                        downloading = (m, st.get("progress"))
+                        break
+            if downloading is not None:
+                m, p = downloading
+                if not self.dl_box.winfo_ismapped():
+                    self.dl_box.pack(fill="x", pady=(4, 0))
+                self.dl_label.config(
+                    text=f"Загрузка «{m}»: "
+                         + (f"{p:.0f}%" if p is not None else "подготовка…")
+                )
+                if p is not None:
+                    self.dl_bar["value"] = p
+            elif self.dl_box.winfo_ismapped():
+                self.dl_box.pack_forget()
+            labels = self._model_labels()
+            if labels != self._last_labels:
+                self._last_labels = labels
+                self.model_cb["values"] = labels
+        except tk.TclError:
+            return
+        self.after(300, self._poll_downloads)
 
     # ------------------------------------------------------------------
     def _build_hotkey(self) -> None:
@@ -907,12 +1085,27 @@ class SettingsDialog(tk.Toplevel):
     def _save(self) -> None:
         if self._capturing is not None:
             self._finish_capture(keep=True)  # завершить захват, снять паузу хоткея
+        engine_name = self._engine_by_label.get(
+            self.engine_var.get(), self.engine_var.get().strip()
+        )
+        model_name = self._model_from_label(self.model_var.get())
+        mgr = self.controller.downloads
+        if engine_name == "faster-whisper" and mgr is not None:
+            st = mgr.state(model_name)
+            if st and st["state"] == "downloading":
+                p = st.get("progress")
+                pct = f"{p:.0f}% " if p is not None else ""
+                messagebox.showwarning(
+                    "Загрузка модели",
+                    f"«{model_name}» ещё загружается ({pct}— дождитесь "
+                    "завершения, затем сохраните настройки снова.",
+                    parent=self,
+                )
+                return
         try:
             updates = dict(
-                engine=self._engine_by_label.get(
-                    self.engine_var.get(), self.engine_var.get().strip()
-                ),
-                model_size=self.model_var.get().strip() or "small",
+                engine=engine_name,
+                model_size=model_name or "small",
                 language=self._rev(LANGS, self.lang_var.get(), ""),
                 device=self._rev(DEVICES, self.device_var.get(), "auto"),
                 compute_type=self._rev(COMPUTES, self.compute_var.get(), "auto"),
