@@ -5,7 +5,6 @@ import time
 from abc import ABC, abstractmethod
 
 from ..platform.base import FocusTarget, PlatformSupport
-from ..platform.focus import FocusManager
 
 
 def activate_target(support: PlatformSupport, target: FocusTarget | None,
