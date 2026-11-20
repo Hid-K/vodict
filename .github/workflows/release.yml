@@ -1,0 +1,59 @@
+name: Release builds
+
+# Сборка дистрибутивов и прикрепление к релизу.
+# Публикуйте релиз (github.com -> Releases -> New release) — соберётся
+# и приложится архив с Vodict.exe.
+# Можно запустить и вручную (workflow_dispatch) — тогда билд уйдёт
+# в артефакты запуска, а не в релиз.
+#
+# TODO: сборка macOS (.app -> .dmg) — отложена, займёмся отдельно.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    env:
+      VERSION: ${{ github.event.release.tag_name || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Зависимости
+        run: pip install -r requirements.txt pyinstaller
+
+      - name: Сборка (PyInstaller)
+        run: pyinstaller --noconfirm packaging/vodict.spec
+
+      - name: Архив (Windows)
+        shell: pwsh
+        run: |
+          Compress-Archive -Path dist/Vodict/* `
+            -DestinationPath "Vodict-windows-$env:VERSION.zip"
+          Get-Item "Vodict-windows-$env:VERSION.zip" |
+            Select-Object Name, Length
+
+      # TODO: сборка macOS (.app -> .dmg) — отложено
+
+      - name: Прикрепить к релизу
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Vodict-windows-*.zip
+          fail_on_unmatched_files: true
+
+      - name: Артефакт (вне релиза)
+        if: github.event_name != 'release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Vodict-windows
+          path: Vodict-windows-*.zip
