@@ -155,6 +155,8 @@ class DictationWindow:
         ttk.Button(bottom, text="Микрофоны", command=self._show_mics).pack(
             side="left", padx=8
         )
+        ttk.Button(bottom, text="🩺", width=3,
+                   command=self._collect_diagnostics).pack(side="left")
         ttk.Button(bottom, text="📜 История", command=self._show_history).pack(side="right")
 
     # ------------------------------------------------------------------
@@ -322,6 +324,22 @@ class DictationWindow:
     def _show_history(self) -> None:
         HistoryDialog(self.root, self.controller)
 
+    def _collect_diagnostics(self) -> None:
+        from ..diagnostics import collect
+
+        try:
+            path = collect(self.controller.config)
+        except Exception as exc:
+            messagebox.showerror("Диагностика", f"Не удалось собрать: {exc}",
+                                 parent=self.root)
+            return
+        if messagebox.askyesno(
+                "Диагностика",
+                f"Файл собран:\n{path}\n\nОтправьте его тому, кто помогает "
+                "с отладкой. Открыть папку?",
+                parent=self.root):
+            open_in_explorer(path.parent)
+
     def _show_mics(self) -> None:
         dialog = tk.Toplevel(self.root)
         dialog.title("Микрофоны")
@@ -367,12 +385,12 @@ class HistoryDialog(tk.Toplevel):
         frm = ttk.Frame(self, padding=10)
         frm.pack(fill="both", expand=True)
 
-        columns = ("time", "sec", "model", "lang", "chars", "status", "text")
-        headers = {"time": "Время", "sec": "Сек", "model": "Модель",
-                   "lang": "Яз", "chars": "Симв.", "status": "Статус",
-                   "text": "Текст"}
-        widths = {"time": 145, "sec": 50, "model": 170, "lang": 35,
-                  "chars": 50, "status": 75, "text": 320}
+        columns = ("time", "sec", "speed", "model", "lang", "chars", "status", "text")
+        headers = {"time": "Время", "sec": "Сек", "speed": "Скорость",
+                   "model": "Модель", "lang": "Яз", "chars": "Симв.",
+                   "status": "Статус", "text": "Текст"}
+        widths = {"time": 145, "sec": 50, "speed": 65, "model": 165, "lang": 35,
+                  "chars": 45, "status": 70, "text": 290}
         self.tree = ttk.Treeview(frm, columns=columns, show="headings", height=16)
         for col in columns:
             self.tree.heading(col, text=headers[col])
@@ -412,9 +430,11 @@ class HistoryDialog(tk.Toplevel):
                      "error": "ошибка"}
         for r in history.read_index(100):
             status = status_ru.get(r.get("status", ""), r.get("status", ""))
+            speed = r.get("speed")
             self.tree.insert("", "end", values=(
                 r.get("time", ""),
                 f"{float(r.get('seconds', 0)):.1f}",
+                f"×{speed}" if speed else "—",
                 r.get("model", ""),
                 r.get("language", ""),
                 r.get("chars", 0),

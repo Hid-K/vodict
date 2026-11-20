@@ -12,6 +12,7 @@
 """
 from __future__ import annotations
 
+import logging
 import queue
 import sys
 import threading
@@ -32,6 +33,8 @@ from .platform.focus import FocusManager
 STATE_IDLE = "idle"
 STATE_RECORDING = "recording"
 STATE_TRANSCRIBING = "transcribing"
+
+log = logging.getLogger(__name__)
 
 _VALID_MODES = {"push_to_talk", "toggle"}
 
@@ -120,10 +123,12 @@ class DictationController:
             try:
                 self.recorder.start()
             except Exception as exc:
+                log.exception("Не удалось начать запись")
                 self._post("error", f"Не удалось начать запись: {exc}")
                 return
             self.state = STATE_RECORDING
             self._record_started = time.time()
+            log.info("Запись начата")
             if self.config.sound_enabled:
                 sounds.beep_start()
         self._post("state", STATE_RECORDING)
@@ -136,9 +141,11 @@ class DictationController:
             try:
                 audio, rate = self.recorder.stop()
             except Exception as exc:
+                log.exception("Не удалось остановить запись")
                 self._set_state(STATE_IDLE)
                 self._post("error", f"Не удалось остановить запись: {exc}")
                 return
+            log.info("Запись остановлена: %.1f с", len(audio) / float(rate) if rate else 0.0)
             self.state = STATE_TRANSCRIBING
             if self.config.sound_enabled:
                 sounds.beep_end()
@@ -202,6 +209,8 @@ class DictationController:
     def _on_download_event(self, kind: str, payload: dict) -> None:
         """События менеджера загрузок -> очередь событий UI."""
         model = payload.get("model", "")
+        log.info("Загрузка модели %s: %s %s", model, kind,
+                 payload.get("percent") or "")
         if kind == "started":
             self._post("model_download_started", model)
         elif kind == "progress":
@@ -257,17 +266,22 @@ class DictationController:
                 )
             else:
                 self._set_state(STATE_IDLE, "Вставлено ✓")
+            log.info("Распознано %d символов за %.1f с (аудио %.1f с)",
+                     len(text), transcribe_seconds,
+                     float(pending.get("audio_seconds", 0.0)) if pending else 0.0)
             self._post("result", text)
             self._finish_history(pending, status="ok", text=text, result=result,
                                  transcribe_seconds=transcribe_seconds,
                                  target_title=self._target_title(target))
         except EngineUnavailable as exc:
+            log.exception("Движок недоступен")
             self._set_state(STATE_IDLE)
             self._post("error", str(exc))
             self._finish_history(pending, status="error", result=result,
                                  transcribe_seconds=transcribe_seconds,
                                  error=str(exc))
         except Exception as exc:
+            log.exception("Ошибка распознавания")
             self._set_state(STATE_IDLE)
             self._post("error", f"Ошибка распознавания: {exc}")
             self._finish_history(pending, status="error", result=result,
@@ -310,9 +324,15 @@ class DictationController:
         if self.history is None or pending is None:
             return
         meta = dict(pending)
+        audio_seconds = float(pending.get("audio_seconds", 0.0) or 0.0)
+        # Скорость распознавания: сколько секунд аудио обрабатывается
+        # за одну секунду реального времени (×2 = вдвое быстрее речи).
+        speed = (round(audio_seconds / transcribe_seconds, 1)
+                 if transcribe_seconds > 0 else None)
         meta.update({
             "status": status,  # ok | empty | insert_error | error
             "text": text,
+            "speed": speed,
             "language_detected": getattr(result, "language", None),
             "language_probability": getattr(result, "language_probability", None),
             "transcribe_seconds": round(transcribe_seconds, 2),
@@ -321,8 +341,12 @@ class DictationController:
         })
         try:
             self.history.write_entry(meta)
+            log.info("История [%s]: аудио %.1f с, распознавание %.1f с (×%s), "
+                     "символов: %d", status, audio_seconds, transcribe_seconds,
+                     speed or 0, len(text))
         except Exception as exc:
             print(f"[history] Не удалось записать историю: {exc}", file=sys.stderr)
+            log.exception("Не удалось записать историю")
 
     def _recognize(self, audio, rate) -> TranscriptionResult:
         audio16 = ensure_rate(audio, rate)
@@ -340,6 +364,7 @@ class DictationController:
                 self.engine = create_engine(
                     self.config.engine, **self._engine_options()
                 )
+                log.info("Движок создан: %s", self.engine.describe())
             return self.engine
 
     def _engine_options(self) -> dict:
@@ -422,6 +447,8 @@ class DictationController:
                 self._post("error", f"Горячая клавиша не запустилась: {exc}")
         self._post("refresh")
         self._post("status", "Настройки сохранены")
+        log.info("Настройки применены: engine=%s model=%s hotkey=%s",
+                 new_config.engine, new_config.model_size, new_config.hotkey)
 
     # ------------------------------------------------------------------
     # жизненный цикл
@@ -429,6 +456,7 @@ class DictationController:
         if self._closed:
             return
         self._closed = True
+        log.info("Завершение работы приложения")
         try:
             self.hotkey.stop()
         except Exception:

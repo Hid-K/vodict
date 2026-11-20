@@ -80,6 +80,7 @@ class HistoryStore:
             "model": f"{meta.get('engine', '')}:{meta.get('model', '')}",
             "language": (meta.get("language_detected")
                          or meta.get("language_requested") or ""),
+            "speed": meta.get("speed"),
             "chars": len(meta.get("text", "") or ""),
             "status": meta.get("status", ""),
             "preview": (meta.get("text", "") or "")[:80],

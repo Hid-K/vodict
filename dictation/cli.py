@@ -27,6 +27,10 @@ def build_parser() -> argparse.ArgumentParser:
                         help="показать микрофоны и выйти")
     parser.add_argument("--history", nargs="?", const=20, type=int, metavar="N",
                         help="показать последние N записей истории диктовок и выйти")
+    parser.add_argument("--diagnostics", action="store_true",
+                        help="собрать диагностику в файл и выйти")
+    parser.add_argument("--debug", action="store_true",
+                        help="подробные логи (stderr + файл лога)")
     return parser
 
 
@@ -82,10 +86,13 @@ def show_history(config, limit: int) -> int:
     if not rows:
         print("История пуста — сделайте первую диктовку.")
         return 0
-    print(f"{'Время':<20} {'Сек':>6}  {'Модель':<24} {'Яз':<3} {'Статус':<8} Текст")
+    print(f"{'Время':<20} {'Сек':>6} {'Скор':>6}  {'Модель':<24} {'Яз':<3} "
+          f"{'Статус':<8} Текст")
     for r in rows:
         seconds = r.get("seconds", 0.0)
-        print(f"{r.get('time', ''):<20} {seconds:>5.1f}  "
+        speed = r.get("speed")
+        speed_text = f"×{speed}" if speed else "—"
+        print(f"{r.get('time', ''):<20} {seconds:>5.1f} {speed_text:>6}  "
               f"{r.get('model', ''):<24} {r.get('language', ''):<3} "
               f"{r.get('status', ''):<8} {r.get('preview', '')}")
     print(f"\nПоказано: {len(rows)}. Аудиозаписи: ~/Vodict/recordings/")
@@ -95,16 +102,36 @@ def show_history(config, limit: int) -> int:
 def main(argv=None) -> int:
     _ensure_printable_console()
     args = build_parser().parse_args(argv)
+
+    from .config import default_config_path
+    from .logging_setup import setup_logging
+
+    logfile = setup_logging(args.debug)
+    if args.debug:
+        print(f"Лог (DEBUG): {logfile}")
+
     if args.list_mics:
         return list_microphones()
 
-    from .config import Config, default_config_path
+    from .config import Config
 
     config = Config.load(args.config)
     apply_overrides(config, args)
 
     if args.history is not None:
         return show_history(config, args.history)
+
+    if args.diagnostics:
+        from .diagnostics import collect
+
+        try:
+            path = collect(config)
+        except Exception as exc:
+            print(f"Не удалось собрать диагностику: {exc}")
+            return 1
+        print(f"Диагностика собрана: {path}")
+        print("Отправьте этот файл тому, кто помогает с отладкой.")
+        return 0
 
     try:
         from .app import DictationController
