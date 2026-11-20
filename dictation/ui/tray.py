@@ -68,7 +68,7 @@ class TrayIcon:
                 "vodict",
                 _icon_image("idle"),
                 _STATE_TITLES["idle"],
-                self._menu(),
+                self._menu(),  # callable — меню пересобирается при открытии
             )
             self._icon.run_detached()
             self._started = True
@@ -88,14 +88,45 @@ class TrayIcon:
             self._started = False
 
     # ------------------------------------------------------------------
+    def notify(self, title: str, message: str) -> bool:
+        """Системное уведомление от иконки трея. False — недоступно."""
+        if not self._started or self._icon is None:
+            return False
+        try:
+            self._icon.notify(message, title)
+            return True
+        except Exception:
+            return False
+
     def _menu(self):
-        return pystray.Menu(
+        # pystray вызывает callable при каждом открытии меню — пункты
+        # всегда актуальны (в т.ч. список скачанных моделей).
+        return pystray.Menu(self._menu_items)
+
+    def _menu_items(self):
+        items = [
             pystray.MenuItem("Показать окно", self._on_show, default=True),
             pystray.MenuItem("Диктовать / Стоп", self._on_toggle),
             pystray.MenuItem("Настройки…", self._on_settings),
-            pystray.Menu.SEPARATOR,
-            pystray.MenuItem("Выход", self._on_quit),
-        )
+        ]
+        models = self.controller.downloaded_models()
+        if models:
+            sub = []
+            active = self.controller.config.model_size
+            for m in models:
+                sub.append(pystray.MenuItem(
+                    m,
+                    (lambda mm: lambda icon, item: self._on_switch(mm))(m),
+                    radio=True,
+                    checked=(lambda mm=m: self.controller.config.model_size == mm),
+                ))
+            items.append(pystray.MenuItem("Переключить модель", pystray.Menu(*sub)))
+        items.append(pystray.Menu.SEPARATOR)
+        items.append(pystray.MenuItem("Выход", self._on_quit))
+        return items
+
+    def _on_switch(self, model: str) -> None:
+        self.controller.events.put(("switch_model", model))
 
     def _on_show(self, icon=None, item=None) -> None:
         self.controller.events.put(("show_window",))

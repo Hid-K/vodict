@@ -22,7 +22,7 @@ from .audio import sounds
 from .config import Config
 from .engines.base import EngineUnavailable, TranscriptionResult
 from .engines.registry import create_engine
-from .downloads import DownloadManager
+from .downloads import DownloadManager, KNOWN_MODELS
 from .history import HistoryStore
 from .hotkeys import HotkeyListener
 from .output import create_inserter
@@ -180,6 +180,24 @@ class DictationController:
         if self.config.engine != "faster-whisper":
             return "na"
         return self.downloads.request_download(model)
+
+    def downloaded_models(self) -> list[str]:
+        """Скачанные модели, кроме активной (для меню и уведомлений)."""
+        if self.config.engine != "faster-whisper":
+            return []
+        active = self.config.model_size
+        return [m for m in KNOWN_MODELS if m != active and self.downloads.is_cached(m)]
+
+    def delete_model(self, model: str) -> int:
+        """Удалить модель из кэша. Возвращает освобождённые байты."""
+        if model == self.config.model_size:
+            raise ValueError(
+                f"«{model}» — активная модель. Сначала переключитесь на другую."
+            )
+        st = self.downloads.state(model)
+        if st and st["state"] == "downloading":
+            raise ValueError(f"«{model}» сейчас загружается — удаление недоступно.")
+        return self.downloads.delete_model(model)
 
     def _on_download_event(self, kind: str, payload: dict) -> None:
         """События менеджера загрузок -> очередь событий UI."""

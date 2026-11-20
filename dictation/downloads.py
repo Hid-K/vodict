@@ -15,8 +15,10 @@ from __future__ import annotations
 
 import concurrent.futures
 import queue
+import shutil
 import threading
 import time
+from pathlib import Path
 from typing import Callable
 
 REPO_TEMPLATE = "Systran/faster-whisper-{model}"
@@ -89,6 +91,7 @@ class DownloadManager:
         self._lock = threading.Lock()
         self._states: dict[str, dict] = {}
         self._cached: set[str] = set()
+        self._sizes: dict[str, int] = {}
         self._queue: queue.Queue[str] = queue.Queue()
         self._tracker = _Tracker()
         self._hook_cls = _make_hook(self._tracker)
@@ -115,22 +118,76 @@ class DownloadManager:
             st = self._states.get(model)
             if st and st["state"] == "downloading":
                 return False
+        return self._snapshot_path(model) is not None
+
+    def cached_models(self) -> list[str]:
+        """Список скачанных моделей (из известных)."""
+        return [m for m in KNOWN_MODELS if self.is_cached(m)]
+
+    def model_size_bytes(self, model: str) -> int | None:
+        """Размер модели на диске (кэшируется)."""
+        with self._lock:
+            if model in self._sizes:
+                return self._sizes[model]
+        root = self._snapshot_path(model)
+        if root is None:
+            return None
+        model_root = self._model_root(root)
+        if model_root is None:
+            return None
+        total = 0
+        for f in model_root.rglob("*"):
+            try:
+                if f.is_file():
+                    total += f.stat().st_size
+            except OSError:
+                continue
+        with self._lock:
+            self._sizes[model] = total
+        return total
+
+    def delete_model(self, model: str) -> int:
+        """Удаляет модель из кэша HF. Возвращает освобождённые байты."""
+        root = self._snapshot_path(model)
+        if root is None:
+            raise FileNotFoundError(f"Модель «{model}» не найдена в кэше")
+        model_root = self._model_root(root)
+        if model_root is None:
+            raise FileNotFoundError(f"Не удалось определить папку модели «{model}»")
+        total = 0
+        for f in model_root.rglob("*"):
+            try:
+                if f.is_file():
+                    total += f.stat().st_size
+            except OSError:
+                continue
+        shutil.rmtree(model_root)
+        with self._lock:
+            self._cached.discard(model)
+            self._sizes.pop(model, None)
+            self._states.pop(model, None)
+        self._emit("deleted", {"model": model})
+        return total
+
+    @staticmethod
+    def _model_root(snapshot_path: Path) -> Path | None:
+        """.../snapshots/<hash> -> .../models--Org--name"""
+        if len(snapshot_path.parents) >= 2:
+            return snapshot_path.parents[1]
+        return None
+
+    def _snapshot_path(self, model: str) -> Path | None:
         try:
             from huggingface_hub import snapshot_download
 
-            snapshot_download(
+            path = snapshot_download(
                 repo_id=self._repo(model),
                 local_files_only=True,
                 allow_patterns=ALLOW_PATTERNS,
             )
+            return Path(path)
         except Exception:
-            return False
-        with self._lock:
-            self._cached.add(model)
-            st = self._states.get(model)
-            if st and st["state"] != "downloading":
-                st["state"] = "available"
-        return True
+            return None
 
     def request_download(self, model: str) -> str:
         """Запустить загрузку. Возвращает "cached" | "already" | "started"."""

@@ -223,7 +223,7 @@ class DictationWindow:
             self.result_var.set(f"Вставлено: {text[:120]}{tail}")
         elif kind == "error":
             self.status_var.set("Ошибка")
-            messagebox.showerror("Vodict", payload, parent=self.root)
+            self._notify_or_dialog("Ошибка диктовки", payload)
         elif kind == "refresh":
             self.hint_var.set(self._hint_text())
             try:
@@ -239,6 +239,8 @@ class DictationWindow:
             self._open_settings()
         elif kind == "quit":
             self._quit()
+        elif kind == "switch_model":
+            self._switch_model(payload)
         elif kind == "model_download_started":
             self.status_var.set(f"Загрузка модели {payload}…")
         elif kind == "model_download_progress":
@@ -249,14 +251,16 @@ class DictationWindow:
         elif kind == "model_download_done":
             model = event[1]
             self.status_var.set(f"Модель {model} загружена ✓")
-            DownloadToast(self.root, model,
-                          on_switch=lambda m=model: self._switch_model(m))
+            self.controller.tray.notify(
+                "Модель загружена ✓",
+                f"{model} готова к использованию. Переключиться: меню иконки "
+                "в трее → «Переключить модель», или в Настройках.",
+            )
         elif kind == "model_download_error":
             model = event[1]
             err = event[2] if len(event) > 2 else ""
             self.status_var.set(f"Ошибка загрузки модели {model}")
-            messagebox.showerror("Загрузка модели", f"{model}: {err}",
-                                 parent=self.root)
+            self._notify_or_dialog("Ошибка загрузки модели", f"{model}: {err}")
 
     # ------------------------------------------------------------------
     def _on_close(self) -> None:
@@ -279,10 +283,18 @@ class DictationWindow:
         self.root.destroy()
 
     def _switch_model(self, model: str) -> None:
-        """Кнопка в уведомлении: сразу переключиться на новую модель."""
+        """Переключиться на загруженную модель (трей/уведомление)."""
         self.controller.apply_settings(
             replace(self.controller.config, model_size=model)
         )
+
+    def _notify_or_dialog(self, title: str, message: str) -> None:
+        """Системное уведомление через иконку трея; если трей недоступен —
+        обычное окно с ошибкой."""
+        tray = self.controller.tray
+        if tray is not None and tray.notify(title, message):
+            return
+        messagebox.showerror(title, message, parent=self.root)
 
     def run(self) -> None:
         self.root.mainloop()
@@ -396,52 +408,6 @@ class HistoryDialog(tk.Toplevel):
 
 
 # ======================================================================
-# Уведомление о завершении загрузки модели
-# ======================================================================
-class DownloadToast(tk.Toplevel):
-    """Небольшое окно в правом нижнем углу: «модель загружена» + кнопка
-    немедленного переключения. Закрывается кнопкой или само через 60 с."""
-
-    def __init__(self, master, model: str, on_switch) -> None:
-        super().__init__(master)
-        self.overrideredirect(True)
-        self.attributes("-topmost", True)
-
-        border = tk.Frame(self, background="#1e88e5", padx=2, pady=2)
-        border.pack()
-        inner = tk.Frame(border, background="white", padx=14, pady=10)
-        inner.pack()
-        tk.Label(inner, text=f"Модель «{model}» загружена ✓",
-                 background="white", foreground="#222222",
-                 font=("", 10, "bold")).pack(anchor="w")
-        row = tk.Frame(inner, background="white")
-        row.pack(fill="x", pady=(8, 0))
-
-        def do_switch() -> None:
-            self.destroy()
-            on_switch()
-
-        ttk.Button(row, text=f"Переключиться на {model}",
-                   command=do_switch).pack(side="left")
-        ttk.Button(row, text="Позже", command=self.destroy).pack(
-            side="left", padx=(8, 0)
-        )
-
-        self.update_idletasks()
-        sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
-        w = max(self.winfo_reqwidth(), 360)
-        h = self.winfo_reqheight()
-        self.geometry(f"{w}x{h}+{sw - w - 24}+{sh - h - 64}")
-        self.after(60000, self._auto_close)
-
-    def _auto_close(self) -> None:
-        try:
-            self.destroy()
-        except tk.TclError:
-            pass
-
-
-# ======================================================================
 # Запись комбинации клавиш с клавиатуры
 # ======================================================================
 class HotkeyCapture:
@@ -518,6 +484,8 @@ class SettingsDialog(tk.Toplevel):
         self.protocol("WM_DELETE_WINDOW", self._cancel)
         self._active_model = config.model_size
         self._last_labels = self._model_labels()
+        self._del_map: dict[str, str] = {}
+        self._last_del_labels: list[str] = []
         self.after(60, self._acquire_grab)
         self.after(300, self._poll_downloads)
 
@@ -605,6 +573,15 @@ class SettingsDialog(tk.Toplevel):
         self.dl_label.pack(anchor="w", pady=(4, 0))
         self.dl_bar.pack(fill="x", pady=(2, 0))
 
+        # Удаление скачанных моделей (освобождение места)
+        holder = self._row(f, "Удаление моделей")
+        self.del_model_var = tk.StringVar()
+        self.del_cb = ttk.Combobox(holder, textvariable=self.del_model_var,
+                                   state="readonly", width=32)
+        self.del_cb.pack(side="left", fill="x", expand=True)
+        ttk.Button(holder, text="🗑 Удалить",
+                   command=self._delete_model).pack(side="left", padx=(8, 0))
+
         holder = self._row(f, "Язык речи")
         self.lang_var = tk.StringVar()
         ttk.Combobox(holder, textvariable=self.lang_var, state="readonly",
@@ -664,12 +641,13 @@ class SettingsDialog(tk.Toplevel):
 
     @staticmethod
     def _model_from_label(label: str) -> str:
-        """«large-v3 ⬇ 45%» -> «large-v3»; произвольный текст — как есть."""
-        for marker in (" ⤓", " ⬇", " ✓", " ⚠"):
+        """«large-v3 ⬇ 45%» / «small (460 МБ)» -> имя модели."""
+        cut = len(label)
+        for marker in (" ⤓", " ⬇", " ✓", " ⚠", " ("):
             i = label.find(marker)
-            if i > 0:
-                return label[:i].strip()
-        return label.strip()
+            if 0 < i < cut:
+                cut = i
+        return label[:cut].strip()
 
     def _on_model_selected(self, event=None) -> None:
         model = self._model_from_label(self.model_var.get())
@@ -729,9 +707,59 @@ class SettingsDialog(tk.Toplevel):
             if labels != self._last_labels:
                 self._last_labels = labels
                 self.model_cb["values"] = labels
+            self._refresh_delete_list()
         except tk.TclError:
             return
         self.after(300, self._poll_downloads)
+
+    def _refresh_delete_list(self) -> None:
+        mgr = self.controller.downloads
+        if mgr is None:
+            return
+        self._del_map = {}
+        labels = []
+        for m in mgr.cached_models():
+            size = mgr.model_size_bytes(m)
+            label = f"{m} ({size / 1e6:.0f} МБ)" if size else m
+            self._del_map[label] = m
+            labels.append(label)
+        if labels != self._last_del_labels:
+            self._last_del_labels = labels
+            self.del_cb["values"] = labels
+            if self.del_model_var.get() not in labels:
+                self.del_model_var.set("")
+
+    def _delete_model(self) -> None:
+        label = self.del_model_var.get().strip()
+        if not label:
+            messagebox.showinfo("Удаление моделей",
+                                "Выберите модель из списка.", parent=self)
+            return
+        model = self._del_map.get(label, self._model_from_label(label))
+        if model == self.controller.config.model_size:
+            messagebox.showwarning(
+                "Удаление моделей",
+                f"«{model}» — активная модель. Сначала переключитесь на другую.",
+                parent=self,
+            )
+            return
+        size = self.controller.downloads.model_size_bytes(model)
+        size_text = f"\nОсвободит ~{size / 1e6:.0f} МБ." if size else ""
+        if not messagebox.askyesno(
+                "Удаление моделей", f"Удалить «{model}» из кэша?{size_text}",
+                parent=self):
+            return
+        try:
+            freed = self.controller.delete_model(model)
+        except Exception as exc:
+            messagebox.showerror("Удаление моделей", str(exc), parent=self)
+            return
+        self._refresh_delete_list()
+        messagebox.showinfo(
+            "Удаление моделей",
+            f"«{model}» удалена. Освобождено {freed / 1e6:.0f} МБ.",
+            parent=self,
+        )
 
     # ------------------------------------------------------------------
     def _build_hotkey(self) -> None:
