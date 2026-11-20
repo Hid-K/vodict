@@ -23,7 +23,16 @@ import numpy as np
 
 
 def default_history_dir() -> Path:
-    return Path.home() / "Vodict"
+    """~/Vodict. Если существует старый ~/VoiceDictation (версия до
+    переименования проекта) — переименовывается автоматически."""
+    new = Path.home() / "Vodict"
+    old = Path.home() / "VoiceDictation"
+    if old.exists() and not new.exists():
+        try:
+            old.rename(new)
+        except OSError:
+            return old
+    return new if new.exists() else old
 
 
 def new_entry_id() -> str:

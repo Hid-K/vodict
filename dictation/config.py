@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sys
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
@@ -9,15 +10,37 @@ from pathlib import Path
 from platformdirs import user_config_dir
 
 APP_NAME = "vodict"
+LEGACY_APP_NAME = "voice-dictation"  # имя проекта до переименования
+
+log = logging.getLogger(__name__)
+
+
+def default_config_dir() -> Path:
+    """Каталог конфигурации: %LOCALAPPDATA%\\Vodict (Windows).
+
+    При первом запуске после переименования проекта старый каталог
+    voice-dictation переименовывается автоматически — настройки и логи
+    переезжают вместе с ним.
+    """
+    new = Path(user_config_dir(APP_NAME, appauthor=False))
+    old = Path(user_config_dir(LEGACY_APP_NAME, appauthor=False))
+    if old.exists() and not new.exists():
+        try:
+            old.rename(new)
+            log.info("Каталог конфигурации перенесён: %s -> %s", old, new)
+        except OSError as exc:
+            log.warning("Не удалось перенести %s: %s — работаем по-старому", old, exc)
+            return old
+    return new if new.exists() else old
 
 
 def default_config_path() -> Path:
     """Путь к config.json по умолчанию (создаётся при первом сохранении).
 
-    Windows:  %LOCALAPPDATA%\\vodict\\config.json
-    macOS:    ~/Library/Application Support/vodict/config.json
+    Windows:  %LOCALAPPDATA%\\Vodict\\config.json
+    macOS:    ~/Library/Application Support/Vodict/config.json
     """
-    return Path(user_config_dir(APP_NAME, appauthor=False)) / "config.json"
+    return default_config_dir() / "config.json"
 
 
 _VALID_MODES = {"push_to_talk", "toggle"}
