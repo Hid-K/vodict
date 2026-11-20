@@ -54,8 +54,17 @@ class FasterWhisperEngine(TranscriptionEngine):
         self.beam_size = beam_size
         self.initial_prompt = (initial_prompt or "").strip() or None
         self.vad_filter = vad_filter
-        # Конструктор скачивает модель при первом запуске.
-        self._model = WhisperModel(model_size, **kwargs)
+
+        # Модель уже в кэше HuggingFace -> грузим локально, без сетевых
+        # проверок обновлений при каждом создании движка (иначе каждый
+        # пересозд идёт в HF API и упирается в лимиты анонимных запросов).
+        try:
+            self._model = WhisperModel(model_size, local_files_only=True, **kwargs)
+        except Exception:
+            # Модели нет в кэше (или кэш повреждён) — обычный путь
+            # со скачиванием через HuggingFace.
+            self._model = WhisperModel(model_size, **kwargs)
+
         self._model_size = model_size
 
     def transcribe(self, audio: np.ndarray, sample_rate: int = 16000) -> TranscriptionResult:
