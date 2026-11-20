@@ -1,0 +1,8 @@
+# Опциональные движки — устанавливайте по желанию:
+#   pip install -r requirements-optional.txt
+
+# Эталонный Whisper от OpenAI (тянет PyTorch, работает медленнее faster-whisper)
+openai-whisper
+
+# Облачный движок OpenAI API (нужен API-ключ)
+openai

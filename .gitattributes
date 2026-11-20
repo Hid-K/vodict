@@ -1,0 +1,16 @@
+# Нормализовать переводы строк в репозитории (LF), в рабочей копии — как настроено git
+* text=auto
+
+# Явно текстовые типы
+*.py text
+*.md text
+*.txt text
+*.json text
+*.toml text
+*.cfg text
+*.ini text
+
+# Бинарные файлы — не трогать
+*.wav binary
+*.png binary
+*.ico binary

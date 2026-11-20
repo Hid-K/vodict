@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.tmp-pip/
+.tmp-tests/
+dist/
+build/
+*.egg-info/
+config.json

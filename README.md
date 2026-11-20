@@ -1,0 +1,202 @@
+# Vodict (Whisper dictation)
+
+Нажали клавишу (или кнопку) → наговорили текст → он **сразу появился в том поле ввода, где был курсор**: мессенджер, редактор, браузер, IDE — что угодно.
+
+Работает на **Windows** и **macOS**. Распознавание — локально через Whisper, а архитектура позволяет подключать любые другие движки (облако, Vosk и т.д.) без изменения остального кода.
+
+> Прототип `mic_whisper.py` из корня сохранён как есть — это первая консольная версия.
+
+---
+
+## Как пользоваться
+
+1. Запустите приложение (`python main.py`) — оно стартует **свёрнутым в трей** (иконка с микрофоном; цвет: зелёный — готов, красный — запись, оранжевый — распознавание). Окно можно открыть двойным кликом по иконке или пунктом меню «Показать окно».
+2. Зажмите **Ctrl + Alt** (горячая клавиша по умолчанию) и говорите — вы услышите короткий сигнал начала.
+3. Отпустите — сигнал окончания, и через пару секунд текст вставится туда, куда вы указывали курсором. Мышь при этом трогать не нужно.
+
+Режимы ввода (Настройки → «Горячая клавиша» → «Режим»):
+- **PTT** (push-to-talk) — удерживать клавишу и говорить, отпустить — вставка;
+- **Switch** — нажал: пошла запись, нажал ещё раз: стоп и вставка.
+
+Альтернатива: кнопка «🎤 Диктовать» в окне или пункт «Диктовать/Стоп» в меню трея.
+
+Выход из программы — только через меню иконки трея → «Выход»; крестик на окне просто сворачивает его обратно в трей.
+
+Первый запуск: модель `small` (~460 МБ) скачается автоматически. В этом проекте модель уже в кэше HuggingFace — начнёт работать сразу.
+
+## Установка
+
+### Windows
+
+```powershell
+py -3 -m venv .venv                 # если venv ещё нет
+.venv\Scripts\activate
+pip install -r requirements.txt
+python main.py
+```
+
+Права системе давать не нужно. При первом запуске разрешите приложению доступ к микрофону, если спросит.
+
+### macOS
+
+```bash
+brew install portaudio
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python main.py
+```
+
+Выдайте права (Системные настройки → Конфиденциальность и безопасность):
+- **Микрофон** — терминалу/Python (запись);
+- **Универсальный доступ** (Accessibility) — эмуляция клавиатуры и глобальный хоткей;
+- **Мониторинг ввода** (Input Monitoring) — глобальный хоткей.
+
+## Опциональные движки
+
+```bash
+pip install -r requirements-optional.txt   # openai-whisper и/или openai
+```
+
+Движок выбирается в «Настройки» окна или через `--engine`. Для облачного `openai-api` укажите API-ключ в настройках или переменную `OPENAI_API_KEY`.
+
+---
+
+## Архитектура
+
+```
+   Окно tkinter (ui/window.py)      Глобальный хоткей (hotkeys.py, pynput)
+              \                        /
+               ▼                      ▼
+        DictationController (app.py)  — конечный автомат idle→recording→transcribing
+             /            \              \
+            ▼              ▼              ▼
+  MicrophoneRecorder   FocusManager   TranscriptionEngine (ABC)  ← подключайте свои
+  (audio/, sounddevice) (platform/)       ├─ FasterWhisperEngine      движки через
+            │                 │           ├─ OpenAIWhisperEngine      @register_engine
+            ▼                 │           └─ OpenAIApiEngine
+   float32 mono 16 kHz        │
+                              ▼
+                     TextInserter (ABC)
+                       ├─ ClipboardPasteInserter (Ctrl+V / ⌘V)
+                       └─ TypingInserter (эмуляция набора)
+```
+
+Ключевые принципы:
+
+- **Движок = плагин.** Интерфейс `TranscriptionEngine` (engines/base.py): на вход numpy float32 mono 16 кГц, на выходе `TranscriptionResult`. Новый движок — один класс с декоратором `@register_engine` и строка импорта в `engines/__init__.py`; он сам появится в настройках и CLI.
+- **Вставка = стратегия.** `TextInserter`: через буфер обмена (быстро, Unicode-безопасно) или эмуляцией набора. Модификатор вставки (Ctrl/⌘) даёт платформенный слой.
+- **Фокус окна = платформенный слой.** Windows — WinAPI через ctypes, macOS — NSWorkspace (pyobjc). Фоновый поток помнит последнее «чужое» окно: если во время записи вы вернулись в целевое поле — вставит прямо туда; если нет — вернёт фокус и вставит.
+- **Потоки.** UI живёт в главном потоке; запись, watchdog (лимит длительности/тишина), фокус-поллер и распознавание — в daemon-потоках. Рабочие потоки публикуют события в очередь, UI разбирает её по таймеру (tkinter остаётся потокобезопасным).
+
+### Как добавить свой движок (пример: Vosk)
+
+```python
+# dictation/engines/vosk_engine.py
+import json
+import numpy as np
+from .base import TranscriptionEngine, TranscriptionResult, EngineUnavailable
+from .registry import register_engine
+
+@register_engine
+class VoskEngine(TranscriptionEngine):
+    name = "vosk"
+    label = "Vosk (офлайн, лёгкая модель)"
+
+    def __init__(self, model_path="vosk-model-small-ru-0.22", **_):
+        super().__init__()
+        try:
+            from vosk import Model, KaldiRecognizer, SetLogLevel
+        except ImportError as exc:
+            raise EngineUnavailable("pip install vosk") from exc
+        SetLogLevel(-1)
+        self._model = Model(model_path)
+
+    def transcribe(self, audio, sample_rate=16000):
+        rec = KaldiRecognizer(self._model, sample_rate)
+        rec.AcceptWaveform(audio.tobytes())
+        text = json.loads(rec.FinalResult()).get("text", "")
+        return TranscriptionResult(text=text.strip(), language="ru")
+```
+
+И одна строка в `dictation/engines/__init__.py`:
+
+```python
+from . import vosk_engine  # noqa: F401
+```
+
+Готово — «vosk» появился в выпадающем списке движков. Нечего менять в UI, контроллере или конфиге.
+
+---
+
+## Настройки (UI)
+
+Кнопка **«⚙ Настройки»** в окне открывает диалог с шестью вкладками — в нём доступны все параметры конфига:
+
+| Вкладка | Что настраивается |
+|---|---|
+| **Распознавание** | движок, модель Whisper, язык, устройство (CPU/CUDA), тип вычислений, beam size, VAD, подсказка модели |
+| **Горячая клавиша** | комбинация (можно **записать с клавиатуры** кнопкой «✎ Записать…») и режим: удерживать/переключение |
+| **Вставка** | способ (буфер / эмуляция печати), восстановление буфера, задержки |
+| **Аудио** | выбор микрофона из списка, **проверка записи (2 с)** с оценкой уровня, частота, лимит записи, авто-стоп тишины |
+| **Облако (OpenAI)** | API-ключ, Base URL для совместимых сервисов, модель API |
+| **Окно** | «поверх всех», путь к config.json + открыть папку |
+
+Кнопка **«По умолчанию»** откатывает поля к заводским значениям, «💾 Сохранить» применяет настройки на лету (движок и хоткей пересоздаются без перезапуска) и пишет конфиг:
+
+- Windows: `%LOCALAPPDATA%\vodict\config.json`
+- macOS: `~/Library/Application Support/vodict/config.json`
+
+Основные параметры (полный список — `dictation/config.py`):
+
+| Параметр | По умолчанию | Описание |
+|---|---|---|
+| `engine` | `faster-whisper` | `faster-whisper` / `openai-whisper` / `openai-api` |
+| `model_size` | `small` | tiny / base / small / medium / large-v3 … (точность ↔ скорость) |
+| `language` | `""` (авто) | `"ru"`, `"en"` — фиксация языка ускоряет и стабилизирует |
+| `initial_prompt` | `""` | подсказка модели: стиль, глоссарий, «английские термины латиницей» |
+| `hotkey` | `ctrl+alt` | комбинация: `ctrl+shift+f9`, `cmd+space`, `win+k`… |
+| `hotkey_mode` | `push_to_talk` | `push_to_talk` (PTT — удерживать) или `toggle` (Switch — нажал/нажал) |
+| `insert_method` | `clipboard` | `clipboard` или `typing` |
+| `restore_clipboard` | `true` | вернуть прежний буфер через ~0.6 с после вставки |
+| `microphone` | `""` (дефолт) | часть имени из «Микрофоны» (`python main.py --list-mics`) |
+| `silence_timeout` | `0` (выкл) | авто-стоп после N секунд тишины |
+| `max_duration` | `120` | жёсткий лимит одной записи |
+| `start_in_tray` | `true` | запуск без окна — работа в фоне, иконка в трее |
+| `sound_enabled` | `true` | звуковые сигналы начала и окончания записи (и ошибок) |
+
+CLI перекрывает конфиг: `python main.py --engine faster-whisper --model base --language ru --hotkey ctrl+shift+f9 --mode toggle --insert typing --mic Microphone`.
+
+## Замечания и ограничения
+
+- **Раскладка не важна**: и вставка через буфер, и эмуляция печати передают Unicode, кириллица печатается независимо от активной раскладки.
+- **Буфер обмена** временно перезаписывается; прежний *текст* восстанавливается, нетекстовое содержимое (картинки, файлы) — теряется. Не хотите трогать буфер — выберите `insert_method: typing`.
+- **Горячая клавиша глобальна**: если комбинация занята другим приложением, возьмите другую (например `ctrl+shift+f9`). Комбинации только из модификаторов (`ctrl+alt`) не «просачиваются» символами в целевое поле; триггеры типа `space` могут оставить пробел.
+- На раскладках с **AltGr** (немецкая и т.п.) `ctrl+alt` конфликтует с AltGr — используйте `ctrl+shift`.
+- **macOS**: без прав Accessibility вставка и хоткей работать не будут — см. раздел установки.
+- Windows-защитник может насторожиться на эмуляцию клавиатуры из консоли — это нормальное поведение SendInput.
+
+## Тесты и проверка
+
+```bash
+python -m unittest discover -s tests -v   # конфиг, хоткеи, реестр движков
+python main.py --list-mics                # список микрофонов
+```
+
+## Структура проекта
+
+```
+main.py                        запуск (python main.py / python -m dictation)
+mic_whisper.py                 исходный консольный прототип
+dictation/
+  app.py                       DictationController — вся логика потока работы
+  cli.py                       argparse, запуск, UTF-8 консоль
+  config.py                    Config (dataclass) + JSON в папке пользователя
+  hotkeys.py                   глобальный хоткей push-to-talk/toggle
+  audio/recorder.py            микрофон (sounddevice) + передискретизация
+  engines/                     base (ABC) → registry → faster_whisper / openai-whisper / openai-api
+  output/                      base (ABC) → clipboard / typing
+  platform/                    base (ABC) → windows / macos (+ focus.py, stub)
+  ui/window.py                 окно tkinter + настройки
+tests/                         unittest: конфиг, хоткеи, реестр
+```
