@@ -430,11 +430,20 @@ class DictationController:
             "target_title": target_title,
             "error": error,
         })
+        # Фактическое устройство/точность распознавания (GPU vs CPU):
+        # резолвится из "auto" при создании движка.
+        engine = self.engine
+        meta.update({
+            "device_used": getattr(engine, "actual_device", None),
+            "compute_type_used": getattr(engine, "actual_compute_type", None),
+        })
         try:
             self.history.write_entry(meta)
             log.info("История [%s]: аудио %.1f с, распознавание %.1f с (×%s), "
-                     "символов: %d", status, audio_seconds, transcribe_seconds,
-                     speed or 0, len(text))
+                     "символов: %d, устройство: %s/%s",
+                     status, audio_seconds, transcribe_seconds,
+                     speed or 0, len(text),
+                     meta["device_used"] or "?", meta["compute_type_used"] or "?")
         except Exception as exc:
             print(f"[history] Не удалось записать историю: {exc}", file=sys.stderr)
             log.exception("Не удалось записать историю")

@@ -42,11 +42,22 @@ class FasterWhisperEngine(TranscriptionEngine):
                 "Не установлен faster-whisper: pip install faster-whisper"
             ) from exc
 
-        kwargs: dict = {}
-        if device and device != "auto":
-            kwargs["device"] = device
-        if compute_type and compute_type != "auto":
-            kwargs["compute_type"] = compute_type
+        # Резолвим "auto" в фактические значения — они попадают в логи
+        # и историю (статистика GPU vs CPU должна показывать реальность).
+        import ctranslate2  # зависимость faster-whisper
+
+        if not device or device == "auto":
+            try:
+                device = "cuda" if ctranslate2.get_cuda_device_count() > 0 else "cpu"
+            except Exception:
+                device = "cpu"
+        if not compute_type or compute_type == "auto":
+            compute_type = "float16" if device == "cuda" else "int8"
+
+        kwargs: dict = {
+            "device": device,
+            "compute_type": compute_type,
+        }
         if cpu_threads:
             kwargs["cpu_threads"] = cpu_threads
 
@@ -54,6 +65,9 @@ class FasterWhisperEngine(TranscriptionEngine):
         self.beam_size = beam_size
         self.initial_prompt = (initial_prompt or "").strip() or None
         self.vad_filter = vad_filter
+        # Фактически использованные устройство и точность — для истории/логов
+        self.actual_device = device
+        self.actual_compute_type = compute_type
 
         # Модель уже в кэше HuggingFace -> грузим локально, без сетевых
         # проверок обновлений при каждом создании движка (иначе каждый
@@ -87,4 +101,5 @@ class FasterWhisperEngine(TranscriptionEngine):
         )
 
     def describe(self) -> str:
-        return f"{self.label} — {self._model_size}"
+        return (f"{self.label} — {self._model_size} "
+                f"({self.actual_device}/{self.actual_compute_type})")

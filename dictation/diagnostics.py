@@ -68,6 +68,8 @@ def _history_info(config: Config) -> list[str]:
         total_audio = 0.0
         total_transcribe = 0.0
         speed_counted = 0
+        # Разбивка по устройству: статистика GPU vs CPU
+        by_device: dict[str, list[float]] = {}
         for line in index.open(encoding="utf-8"):
             line = line.strip()
             if not line:
@@ -84,12 +86,21 @@ def _history_info(config: Config) -> list[str]:
             if seconds > 0 and speed > 0:
                 total_transcribe += seconds / speed
                 speed_counted += 1
+                dev = (r.get("device_used")
+                       or f"неизвестно ({r.get('compute_type', 'auto')})")
+                by_device.setdefault(dev, []).append((seconds, seconds / speed))
         rows.append(f"диктовок в индексе: {count}")
         rows.append(f"суммарная длительность аудио: {total_audio:.1f} с")
         if speed_counted:
             rows.append(f"суммарное время распознавания: {total_transcribe:.1f} с")
             rows.append(f"средняя скорость: ×{total_audio / total_transcribe:.1f} "
                         f"(по {speed_counted} диктовкам)")
+            for dev, pairs in sorted(by_device.items()):
+                audio_sum = sum(p[0] for p in pairs)
+                time_sum = sum(p[1] for p in pairs)
+                avg = audio_sum / time_sum if time_sum > 0 else 0.0
+                rows.append(f"  {dev}: {len(pairs)} диктовк(и), "
+                            f"средняя скорость ×{avg:.1f}")
         else:
             rows.append("скорость пока не измерялась")
         return rows

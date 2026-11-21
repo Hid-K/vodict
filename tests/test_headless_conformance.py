@@ -172,9 +172,18 @@ class HeadlessConformanceTests(unittest.TestCase):
         self.c.start_recording()
         self.assertEqual(self.c.state, "recording")
         self.c.stop_recording()
-        self.wait_idle()
-        self.assertEqual(self.c.state, "idle")
+        # ждём ОБЕ вставки: между задачами очереди состояние на миг idle,
+        # поэтому ориентироваться на state здесь нельзя
+        t0 = time.monotonic()
+        while len(self.stub.inserted) < 2 and time.monotonic() - t0 < 5:
+            time.sleep(0.02)
         self.assertEqual(len(self.stub.inserted), 2)
+        t0 = time.monotonic()
+        while self.c.state != "idle" and time.monotonic() - t0 < 5:
+            time.sleep(0.02)
+        self.assertEqual(self.c.state, "idle")
+        kinds = [e[0] for e in self._drain()]
+        self.assertEqual(kinds.count("result"), 2)
 
     def test_shutdown_is_clean(self):
         self.c.shutdown()
