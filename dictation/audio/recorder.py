@@ -10,7 +10,8 @@ try:
     import sounddevice as sd
 except ImportError as exc:  # pragma: no cover
     raise ImportError(
-        "Не установлен sounddevice. Установите зависимости: pip install -r requirements.txt"
+        f"Не установлен sounddevice ({exc}). "
+        "Установите зависимости: pip install -r requirements.txt"
     ) from exc
 
 TARGET_RATE = 16000

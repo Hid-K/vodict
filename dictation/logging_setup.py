@@ -25,18 +25,29 @@ def setup_logging(debug: bool = False) -> Path:
     root = logging.getLogger()
     root.setLevel(level)
 
-    # Лог-файл не критичен: если его нельзя создать (права, read-only),
-    # приложение продолжает работать с логом в stderr.
+    # Лог-файл не критичен: если его нельзя создать (права, read-only,
+    # занят другим экземпляром приложения), пробуем запасное имя, а если
+    # и оно недоступно — продолжаем с логом в stderr.
     file_ok = False
-    try:
-        file_handler = logging.handlers.RotatingFileHandler(
-            logfile, maxBytes=1_000_000, backupCount=3, encoding="utf-8"
-        )
-        file_handler.setFormatter(fmt)
-        root.addHandler(file_handler)
-        file_ok = True
-    except OSError as exc:
-        print(f"[log] Лог-файл недоступен ({logfile}): {exc}", file=sys.stderr)
+    candidates = [logfile, log_dir / "app-2.log"]
+    for candidate in candidates:
+        try:
+            file_handler = logging.handlers.RotatingFileHandler(
+                candidate, maxBytes=1_000_000, backupCount=3, encoding="utf-8"
+            )
+            file_handler.setFormatter(fmt)
+            root.addHandler(file_handler)
+            file_ok = True
+            logfile = candidate
+            break
+        except OSError:
+            continue
+    if not file_ok:
+        # В windowed-сборке sys.stderr может быть None — print молчит.
+        try:
+            print(f"[log] Лог-файл недоступен ({logfile})", file=sys.stderr)
+        except Exception:
+            pass
 
     console = logging.StreamHandler(sys.stderr)
     console.setFormatter(fmt)

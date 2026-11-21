@@ -216,15 +216,19 @@ Vodict/
 GitHub Actions:
 
 - **CI** (`.github/workflows/ci.yml`) — на каждый push/PR: компиляция и тесты на Windows и macOS runner'ах (Python 3.12).
-- **Release builds** (`.github/workflows/release.yml`) — при публикации релиза на GitHub: PyInstaller собирает `Vodict.exe` (onedir → zip) и прикрепляет архив к релизу. Запуск вручную (workflow_dispatch) кладёт билд в артефакты. Сборка macOS (.app → .dmg) пока отложена.
+- **Release builds** (`.github/workflows/release.yml`) — при публикации релиза на GitHub: собирает Windows portable + установщик и macOS .dmg и прикрепляет всё к релизу. Запуск вручную (workflow_dispatch; поле **tag** = существующий тег релиза) пересобирает и перезаливает файлы (--clobber).
 
-Локальная сборка:
+### Сборка локально (без GitHub)
 
 ```powershell
-pip install -r requirements.txt pyinstaller
-pyinstaller --noconfirm packaging/vodict.spec
-# результат: dist/Vodict/Vodict.exe (Windows)
+scripts\build_local.bat              # portable + установщик (если стоит Inno Setup)
+scripts\build_local.bat -Run         # + smoke-проверка собранного exe
 ```
+
+- Требуется venv с зависимостями и PyInstaller: `pip install -r requirements.txt pyinstaller`.
+- Результаты: `Vodict-local-portable.zip`, приложение `dist\Vodict\Vodict.exe`, установщик `dist\installer\Vodict-setup-local.exe` (если установлен [Inno Setup 6](https://jrsoftware.org/isinfo.php): `winget install JRSoftware.InnoSetup`).
+- Docker для Windows-exe не нужен: PyInstaller собирает нативно; Linux-контейнер собрать Windows-бинарник не может.
+- Если Python установлен через **conda**, spec автоматически добавляет `ffi-8.dll` — зависимость `_ctypes` (в python.org-сборке libffi вшита).
 
 **Тестирование на чистом Mac** (сборка unsigned, arm64):
 

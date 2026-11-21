@@ -68,6 +68,10 @@ if _ort_spec and _ort_spec.submodule_search_locations:
 hiddenimports += [
     "tkinter",
     "socksio",
+    # sounddevice >=0.5 на новых Python (нет скомпилированного pyd) работает
+    # через cffi ABI-режим; без cffi в бандле импорт падает с ImportError.
+    "cffi",
+    "_cffi_backend",
     # WinRT-проекции для windows_toasts (на всякий случай, не все видны анализу)
     "winrt._winrt",
     "winrt.system",
@@ -76,6 +80,16 @@ hiddenimports += [
     "winrt.windows.data.xml.dom",
     "winrt.windows.ui.notifications",
 ]
+
+# conda-сборка Python: _ctypes.pyd зависит от внешней ffi-8.dll из
+# <base_prefix>\Library\bin (в python.org-сборке libffi вшита — поэтому
+# в CI этой проблемы нет). Без неё в заморозенном приложении падает
+# «DLL load failed while importing _ctypes», а за ним и sounddevice.
+_conda_bin = os.path.join(getattr(sys, "base_prefix", sys.prefix), "Library", "bin")
+for _ffi_dll in ("ffi-8.dll", "ffi.dll"):
+    _candidate = os.path.join(_conda_bin, _ffi_dll)
+    if os.path.exists(_candidate):
+        binaries.append((_candidate, "."))
 
 is_mac = sys.platform == "darwin"
 
