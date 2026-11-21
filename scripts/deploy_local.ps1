@@ -19,12 +19,12 @@ if (([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::
 }
 
 Write-Host "[1/5] Закрываю работающий Vodict..."
-taskkill /f /im Vodict.exe 2>$null | Out-Null
+cmd /c "taskkill /f /im Vodict.exe >nul 2>&1"
 
 Write-Host "[2/5] Чиню права и удаляю старую установку: $target"
 if (Test-Path $target) {
-    takeown /f $target /r /d y | Out-Null
-    icacls $target /reset /t /c | Out-Null
+    cmd /c "takeown /f $target /r /d y >nul 2>&1"
+    cmd /c "icacls $target /reset /t /c >nul 2>&1"
     Remove-Item $target -Recurse -Force
 }
 
