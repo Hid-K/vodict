@@ -52,7 +52,7 @@ import time
 
 import numpy as np
 
-from .audio.recorder import MicrophoneRecorder, ensure_rate
+from .audio.recorder import MicrophoneRecorder, ensure_rate, resolve_device
 from .audio import sounds
 from .config import Config
 from .engines.base import EngineUnavailable, TranscriptionResult
@@ -487,6 +487,9 @@ class DictationController:
         if mic_changed:
             self.recorder.device = new_config.microphone or None
             self.recorder.requested_rate = new_config.sample_rate
+            problem = self.microphone_problem()
+            if problem:
+                self._post("status", problem)
         if history_changed:
             self.history = (HistoryStore(new_config.history_dir or None)
                             if new_config.history_enabled else None)
@@ -532,6 +535,23 @@ class DictationController:
             log.error("Глобальная горячая клавиша не запустилась: %s", exc)
             self._post("error", f"Глобальная горячая клавиша не запустилась: {exc}")
         self.warmup_engine_async()
+        # Выбранный микрофон мог быть отключён с прошлого раза: сообщаем
+        # сразу (тост), а не при первой попытке диктовки.
+        problem = self.microphone_problem()
+        if problem:
+            self._post("error", problem)
+
+    def microphone_problem(self) -> str | None:
+        """Текст проблемы с настроенным микрофоном или None."""
+        from .audio.recorder import resolve_device
+
+        device = (self.config.microphone or "").strip()
+        if not device:
+            return None  # микрофон по умолчанию — проблемы покажем при записи
+        if resolve_device(device) is None:
+            return (f"Микрофон «{device}» не найден — проверьте подключение "
+                    "или выберите другой в Настройках")
+        return None
 
     def shutdown(self) -> None:
         if self._closed:
