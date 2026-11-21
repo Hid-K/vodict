@@ -86,14 +86,16 @@ def show_history(config, limit: int) -> int:
     if not rows:
         print("История пуста — сделайте первую диктовку.")
         return 0
-    print(f"{'Время':<20} {'Сек':>6} {'Скор':>6}  {'Модель':<24} {'Яз':<3} "
-          f"{'Статус':<8} Текст")
+    print(f"{'Время':<20} {'Сек':>6} {'Скор':>6}  {'Модель':<24} {'Кач':<7} "
+          f"{'Beam':>4} {'Яз':<3} {'Статус':<8} Текст")
     for r in rows:
         seconds = r.get("seconds", 0.0)
         speed = r.get("speed")
         speed_text = f"×{speed}" if speed else "—"
+        beam = r.get("beam_size")
         print(f"{r.get('time', ''):<20} {seconds:>5.1f} {speed_text:>6}  "
-              f"{r.get('model', ''):<24} {r.get('language', ''):<3} "
+              f"{r.get('model', ''):<24} {r.get('compute_type', ''):<7} "
+              f"{str(beam) if beam else '—':>4} {r.get('language', ''):<3} "
               f"{r.get('status', ''):<8} {r.get('preview', '')}")
     print(f"\nПоказано: {len(rows)}. Аудиозаписи: ~/Vodict/recordings/")
     return 0

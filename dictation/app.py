@@ -398,6 +398,12 @@ class DictationController:
             "engine": self.config.engine,
             "model": model,
             "language_requested": self.config.language,
+            # Параметры распознавания: позволяют воспроизвести результат
+            "compute_type": self.config.compute_type,
+            "device": self.config.device,
+            "beam_size": self.config.beam_size,
+            "vad_filter": self.config.vad_filter,
+            "initial_prompt": self.config.initial_prompt or "",
         })
         return meta
 
