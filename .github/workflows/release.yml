@@ -111,3 +111,56 @@ jobs:
             Vodict-windows-*.zip
             dist/installer/Vodict-setup-*.exe
             SHA256SUMS.txt
+
+  # Сборка под Apple Silicon (M1/M2). Приложение без подписи: на машине
+  # друга после распаковки снять карантин — xattr -cr /Applications/Vodict.app
+  # (подробности в README, раздел про macOS).
+  build-macos:
+    runs-on: macos-latest
+    env:
+      VERSION: ${{ github.event.release.tag_name || inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: PortAudio (для sounddevice)
+        run: brew install portaudio
+
+      - name: Зависимости
+        run: pip install -r requirements.txt pyinstaller
+
+      - name: Санити-проверка импортов
+        run: python -c "import sounddevice, faster_whisper, ctranslate2, av; print('imports ok')"
+
+      - name: Сборка (PyInstaller -> Vodict.app)
+        run: pyinstaller --noconfirm packaging/vodict.spec
+
+      - name: Проверка наличия .app
+        run: |
+          test -d "dist/Vodict.app"
+          ls -la dist/
+
+      - name: Упаковка (.dmg)
+        run: |
+          cd dist
+          hdiutil create -volname Vodict -srcfolder "$(pwd)/Vodict.app" \
+            -ov -format UDZO "Vodict-macos-${VERSION}.dmg"
+          ls -la Vodict-macos-*.dmg
+
+      - name: Прикрепить к релизу
+        if: github.event_name == 'release' || inputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release upload "$VERSION" --clobber Vodict-macos-*.dmg
+
+      - name: Артефакт (вне релиза)
+        if: github.event_name != 'release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Vodict-macos
+          path: Vodict-macos-*.dmg
