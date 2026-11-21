@@ -67,6 +67,7 @@ if _ort_spec and _ort_spec.submodule_search_locations:
 
 hiddenimports += [
     "tkinter",
+    "socksio",
     # WinRT-проекции для windows_toasts (на всякий случай, не все видны анализу)
     "winrt._winrt",
     "winrt.system",

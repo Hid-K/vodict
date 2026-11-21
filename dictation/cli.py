@@ -118,6 +118,9 @@ def main(argv=None) -> int:
     config = Config.load(args.config)
     apply_overrides(config, args)
 
+    from .proxy import apply_proxy_env
+    apply_proxy_env(config)
+
     if args.history is not None:
         return show_history(config, args.history)
 
@@ -151,7 +154,8 @@ def main(argv=None) -> int:
 
     controller = DictationController(config)
     try:
-        controller.run()
+        from .bootstrap import run_app
+        run_app(config, controller)
     finally:
         controller.shutdown()
     return 0

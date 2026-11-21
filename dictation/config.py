@@ -116,6 +116,10 @@ class Config:
     save_audio: bool = True          # сохранять wav-записи голоса
     history_dir: str = ""            # пусто = ~/Vodict
 
+    # --- сеть ------------------------------------------------------------------
+    proxy_enabled: bool = False      # прокси для HuggingFace / OpenAI API
+    proxy_url: str = ""              # напр. socks5://127.0.0.1:1080 (можно user:pass@)
+
     # -----------------------------------------------------------------------
     @classmethod
     def load(cls, path: str | Path | None = None) -> "Config":

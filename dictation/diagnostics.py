@@ -15,6 +15,7 @@ from pathlib import Path
 
 from . import __version__
 from .config import Config, default_config_path
+from .proxy import mask_proxy_url
 
 
 def _audio_devices() -> list[str]:
@@ -107,6 +108,9 @@ def _config_json(config: Config) -> str:
     data = dataclasses.asdict(config)
     if data.get("api_key"):
         data["api_key"] = "***скрыто в целях безопасности***"
+    if data.get("proxy_url"):
+        # логин:пароль в URL прокси не должен попадать в файл диагностики
+        data["proxy_url"] = mask_proxy_url(str(data["proxy_url"]))
     return json.dumps(data, ensure_ascii=False, indent=2)
 
 

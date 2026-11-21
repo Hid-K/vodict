@@ -194,7 +194,7 @@ class DictationWindow:
         height = int(canvas.winfo_height())
         canvas.delete("all")
         if self.controller.state == "recording" and width > 10:
-            level = min(1.0, self.controller.recorder.level * 6)
+            level = min(1.0, self.controller.recording_level() * 6)
             canvas.create_rectangle(0, 0, max(2, int(width * level)), height,
                                     fill="#c62828", width=0)
 
@@ -620,6 +620,19 @@ class SettingsDialog(tk.Toplevel):
         ttk.Button(holder, text="🗑 Удалить",
                    command=self._delete_model).pack(side="left", padx=(8, 0))
 
+        holder = self._row(f, "Прокси для HuggingFace")
+        self.proxy_enabled_var = tk.BooleanVar()
+        ttk.Checkbutton(holder, text="Использовать прокси (SOCKS5/HTTP)",
+                        variable=self.proxy_enabled_var).pack(anchor="w")
+        self.proxy_url_var = tk.StringVar()
+        ttk.Entry(holder, textvariable=self.proxy_url_var, width=36).pack(
+            anchor="w", pady=(2, 0))
+        ttk.Label(holder, text="пример: socks5://127.0.0.1:1080 или "
+                  "socks5://user:pass@host:1080. Применяется после "
+                  "перезапуска приложения.",
+                  foreground="#888888", wraplength=380,
+                  justify="left").pack(anchor="w", pady=(2, 0))
+
         holder = self._row(f, "Язык речи")
         self.lang_var = tk.StringVar()
         ttk.Combobox(holder, textvariable=self.lang_var, state="readonly",
@@ -999,6 +1012,8 @@ class SettingsDialog(tk.Toplevel):
         self.history_var.set(cfg.history_enabled)
         self.save_audio_var.set(cfg.save_audio)
         self.historydir_var.set(cfg.history_dir)
+        self.proxy_enabled_var.set(cfg.proxy_enabled)
+        self.proxy_url_var.set(cfg.proxy_url)
         self.topmost_var.set(cfg.always_on_top)
 
     def _reset_defaults(self) -> None:
@@ -1081,7 +1096,7 @@ class SettingsDialog(tk.Toplevel):
     # запись комбинации
     def _toggle_capture(self) -> None:
         if self._capturing is None:
-            self.controller.hotkey.set_paused(True)  # не начать диктовку случайно
+            self.controller.pause_hotkey(True)  # не начать диктовку случайно
             self._capturing = HotkeyCapture()
             self._capturing.start()
             self._capture_deadline = time.time() + 12.0
@@ -1204,6 +1219,8 @@ class SettingsDialog(tk.Toplevel):
                 history_enabled=bool(self.history_var.get()),
                 save_audio=bool(self.save_audio_var.get()),
                 history_dir=self.historydir_var.get().strip(),
+                proxy_enabled=bool(self.proxy_enabled_var.get()),
+                proxy_url=self.proxy_url_var.get().strip(),
                 always_on_top=bool(self.topmost_var.get()),
             )
         except ValueError as exc:

@@ -1,14 +1,46 @@
 """DictationController — связывает запись, распознавание и вставку.
 
+КОНТРАКТ «ядро ↔ любой фронтенд» (tkinter, Qt, Web, TUI — всё равно):
+
+Фронтенд МОЖЕТ читать (публичные атрибуты — состояние и данные, не логика):
+  controller.state              "idle" | "recording" | "transcribing"
+  controller.config             текущий Config
+  controller.recording_level()  уровень сигнала записи (0..~1)
+  controller.downloads.states() / .cached_models() / .model_size_bytes(m)
+  controller.history.read_index(n)
+  controller.events             очередь событий (см. таблицу ниже)
+
+Фронтенд ВЫЗЫВАЕТ (публичные методы, потокобезопасно):
+  controller.on_button()                 старт/стоп диктовки
+  controller.start_recording() / stop_recording()
+  controller.pause_hotkey(bool)          пауза глобального хоткея
+  controller.apply_settings(Config, save=True)
+  controller.request_model_download(repo) -> "cached"|"already"|"started"|"na"
+  controller.delete_model(repo) -> int   / downloaded_models()
+  controller.collect_diagnostics() -> Path
+  controller.shutdown()
+
+Ядро -> фронтенд: очередь ``events``, кортежи (kind, *payload):
+
+  ("state", "idle"|"recording"|"transcribing")
+  ("status", текст)                    короткий текст состояния
+  ("result", текст)                    распознанный текст
+  ("error", текст)                     ошибка (фронтенд решает, как показать)
+  ("refresh",)                         настройки изменились — обновить вид
+  ("model_download_started"|"progress"|"done"|"error", модель[, процент])
+  ("switch_model", имя)                из трея — сменить модель
+  ("show_window"|"open_settings"|"quit") — команды от трея
+
+Единственное место, знающее про конкретный UI, — метод ``run()``
+(композиция: окно + трей + mainloop). Любой другой фронтенд реализует
+свой аналог ``run()`` поверх тех же вызовов и очереди.
+
 Потоковая модель:
-- главный поток: tkinter (UI);
+- главный поток: event loop фронтенда (tkinter/Qt/...);
 - фокус-поллер: фоновый daemon-поток FocusManager;
 - запись: звук пишет колбэк PortAudio (поток sounddevice);
 - watchdog записи: контроль max_duration / тишины;
 - распознавание и вставка: отдельный daemon-поток на каждый фрагмент.
-
-События для UI публикуются в thread-safe очередь ``events`` и
-разбираются главным потоком.
 """
 from __future__ import annotations
 
@@ -26,6 +58,7 @@ from .engines.registry import create_engine
 from .downloads import DownloadManager, KNOWN_MODELS
 from .history import HistoryStore
 from .hotkeys import HotkeyListener
+from .proxy import apply_proxy_env
 from .output import create_inserter
 from .platform import create_platform_support
 from .platform.focus import FocusManager
@@ -397,7 +430,8 @@ class DictationController:
 
     # ------------------------------------------------------------------
     # настройки
-    def apply_settings(self, new_config: Config) -> None:
+    def apply_settings(self, new_config: Config, *, save: bool = True) -> None:
+        """Применить настройки; ``save=False`` — не писать конфиг на диск."""
         hotkey_changed = (
             new_config.hotkey != self.config.hotkey
             or new_config.hotkey_mode != self.config.hotkey_mode
@@ -411,12 +445,21 @@ class DictationController:
             new_config.history_enabled != self.config.history_enabled
             or new_config.history_dir != self.config.history_dir
         )
+        proxy_changed = (
+            new_config.proxy_enabled != self.config.proxy_enabled
+            or new_config.proxy_url != self.config.proxy_url
+        )
 
         self.config = new_config
-        try:
-            new_config.save()
-        except Exception as exc:
-            self._post("error", f"Не удалось сохранить конфиг: {exc}")
+        if save:
+            try:
+                new_config.save()
+            except Exception as exc:
+                self._post("error", f"Не удалось сохранить конфиг: {exc}")
+
+        if proxy_changed:
+            apply_proxy_env(new_config)
+            log.info("Прокси применён: %s", new_config.proxy_url or "выключен")
 
         if mic_changed:
             self.recorder.device = new_config.microphone or None
@@ -451,7 +494,22 @@ class DictationController:
                  new_config.engine, new_config.model_size, new_config.hotkey)
 
     # ------------------------------------------------------------------
-    # жизненный цикл
+    # сервисы и жизненный цикл
+    def start_services(self) -> None:
+        """Фоновые сервисы БЕЗ UI: фокус-поллер, хоткей, прогрев движка.
+
+        Вызывается точкой сборки (bootstrap) до event loop'а; любой
+        фронтенд может запустить эти сервисы и управлять контроллером
+        через публичный API, вообще не имея графического окна.
+        """
+        self.focus.start()
+        try:
+            self.hotkey.start()
+        except Exception as exc:
+            log.error("Глобальная горячая клавиша не запустилась: %s", exc)
+            self._post("error", f"Глобальная горячая клавиша не запустилась: {exc}")
+        self.warmup_engine_async()
+
     def shutdown(self) -> None:
         if self._closed:
             return
@@ -476,30 +534,29 @@ class DictationController:
             except Exception:
                 pass
 
-    def run(self) -> None:
-        from .ui.tray import TrayIcon
-        from .ui.window import DictationWindow  # tkinter нужен в главном потоке
+    # ------------------------------------------------------------------
+    # публичный API для фронтендов (фасады над внутренними компонентами)
+    def recording_level(self) -> float:
+        """Уровень сигнала записи (0..~1) — для индикаторов UI."""
+        return float(self.recorder.level)
 
-        self.ui = DictationWindow(self.config, self, show=False)
+    def pause_hotkey(self, paused: bool) -> None:
+        """Временно заглушить глобальный хоткей (запись комбинации в UI)."""
+        self.hotkey.set_paused(bool(paused))
 
-        # Трей: если недоступен — покажем обычное окно.
-        self.tray = TrayIcon(self)
-        tray_ok = self.tray.start()
-        show_window = not tray_ok or not self.config.start_in_tray
-        if self.config.start_in_tray and not tray_ok:
-            print("[tray] Трей недоступен (pip install pystray pillow) — показываю окно")
-        if show_window:
-            self.ui.show()
+    def model_size_bytes(self, model: str) -> int | None:
+        """Размер скачанной модели на диске."""
+        return self.downloads.model_size_bytes(model)
 
-        self.focus.start()
-        try:
-            self.hotkey.start()
-        except Exception as exc:
-            self._post("error", f"Глобальная горячая клавиша не запустилась: {exc}")
-        self.warmup_engine_async()
-        try:
-            self.ui.run()
-        finally:
-            if self.tray is not None:
-                self.tray.stop()
-            self.shutdown()
+    def download_states(self) -> dict[str, dict]:
+        """Текущие состояния загрузок моделей."""
+        return self.downloads.states()
+
+    def cached_models(self) -> list[str]:
+        """Скачанные модели (из известных)."""
+        return self.downloads.cached_models()
+
+    # Метод run() и точка сборки приложения переехали в dictation/bootstrap.py:
+    # ядро больше не знает о существовании графического интерфейса. Любой
+    # фронтенд реализует свой аналог bootstrap.run_app() поверх публичного
+    # API этого класса и очереди events.
