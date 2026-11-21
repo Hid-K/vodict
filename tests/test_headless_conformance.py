@@ -58,7 +58,8 @@ class _StubRecorder:
 
     def stop(self):
         import numpy as np
-        return np.zeros(1600, dtype=np.float32), 16000
+        audio = (np.sin(np.linspace(0, 90, 1600)) * 0.3).astype(np.float32)
+        return audio, 16000
 
 
 class BackendImportIsolationTests(unittest.TestCase):

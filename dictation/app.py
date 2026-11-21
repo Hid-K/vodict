@@ -50,6 +50,8 @@ import sys
 import threading
 import time
 
+import numpy as np
+
 from .audio.recorder import MicrophoneRecorder, ensure_rate
 from .audio import sounds
 from .config import Config
@@ -178,7 +180,19 @@ class DictationController:
                 self._set_state(STATE_IDLE)
                 self._post("error", f"Не удалось остановить запись: {exc}")
                 return
-            log.info("Запись остановлена: %.1f с", len(audio) / float(rate) if rate else 0.0)
+            log.info("Запись остановлена: %.1f с",
+                     len(audio) / float(rate) if rate else 0.0)
+
+            # Цифровой ноль: микрофон не передаёт данных (отключён, замучен
+            # или неисправен) — сообщаем явно вместо тихой пустой вставки.
+            peak = float(np.max(np.abs(audio))) if audio.size else 0.0
+            if peak <= 0.0:
+                log.warning("Запись пуста: микрофон не передаёт сигнал")
+                self._set_state(STATE_IDLE)
+                self._post("error", "С микрофона не поступило звука — проверьте "
+                                    "подключение, что он включён и не замучен, "
+                                    "и что выбран в Настройках")
+                return
             self.state = STATE_TRANSCRIBING
             if self.config.sound_enabled:
                 sounds.beep_end()
@@ -197,6 +211,15 @@ class DictationController:
             elapsed = self.recorder.elapsed()
             if self.config.max_duration > 0 and elapsed >= self.config.max_duration:
                 self._post("status", "Достигнут лимит длительности — останавливаюсь")
+                self.stop_recording()
+                return
+            # Микрофон не подаёт сигнал вообще (отключён/замучен): после
+            # 3 секунд строго нулевого уровня — явная ошибка пользователю.
+            if elapsed > 3.0 and self.recorder.peak <= 0.0:
+                log.warning("Микрофон не подаёт сигнал (peak=0 за %.1f с записи)",
+                            elapsed)
+                self._post("error", "С микрофона не поступает сигнал — проверьте, "
+                                    "что он включён, не замучен и выбран в настройках")
                 self.stop_recording()
                 return
             timeout = self.config.silence_timeout
