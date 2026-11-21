@@ -298,7 +298,7 @@ class DictationController:
         """События менеджера загрузок -> очередь событий UI."""
         model = payload.get("model", "")
         log.info("Загрузка модели %s: %s %s", model, kind,
-                 payload.get("percent") or "")
+                 payload.get("percent") or payload.get("error") or "")
         if kind == "started":
             self._post("model_download_started", model)
         elif kind == "progress":

@@ -12,4 +12,4 @@ Architecture overview:
 - ``dictation.app``        — DictationController wiring everything together.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
