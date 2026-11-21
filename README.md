@@ -211,28 +211,81 @@ Vodict/
 
 Приватность: в файле диагностики нет содержимого ваших диктовок и api_key; аудиозаписи не собираются.
 
-## Сборка и релизы (CI/CD)
+## Сборка из исходников
 
-GitHub Actions:
+Собрать можно на любой машине: **Windows-exe — только на Windows, macOS .app — только на Mac** (кросс-компиляция невозможна: PyInstaller собирает под текущую ОС, а скомпилированные зависимости нужны в сборке целевой платформы). Docker не поможет — Linux-контейнер не собирает Windows-бинарники. Если нет нужной ОС под рукой — используйте CI (см. ниже), он собирает обе платформы.
 
-- **CI** (`.github/workflows/ci.yml`) — на каждый push/PR: компиляция и тесты на Windows и macOS runner'ах (Python 3.12).
-- **Release builds** (`.github/workflows/release.yml`) — при публикации релиза на GitHub: собирает Windows portable + установщик и macOS .dmg и прикрепляет всё к релизу. Запуск вручную (workflow_dispatch; поле **tag** = существующий тег релиза) пересобирает и перезаливает файлы (--clobber).
+### Подготовка (все платформы)
 
-### Сборка локально (без GitHub)
+```bash
+git clone https://github.com/Hid-K/vodict && cd vodict
+python -m venv .venv
+# Windows:
+.venv\Scripts\activate
+# macOS/Linux:
+source .venv/bin/activate
+
+pip install -r requirements.txt pyinstaller
+```
+
+Нужен Python 3.12+ (проверено на 3.12 и 3.14). Все пути сборки описаны в `packaging/vodict.spec`; установщик — `packaging/installer.iss` (Inno Setup).
+
+### Сборка на Windows
+
+Вручную:
+
+```powershell
+pyinstaller --noconfirm packaging/vodict.spec      # → dist\Vodict\Vodict.exe
+Compress-Archive -Path dist/Vodict/* -DestinationPath Vodict-portable.zip
+```
+
+Установщик (нужен [Inno Setup 6](https://jrsoftware.org/isinfo.php), `winget install JRSoftware.InnoSetup` или `choco install innosetup`):
+
+```powershell
+& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DMyAppVersion=<версия> packaging/installer.iss
+# → dist\installer\Vodict-setup-<версия>.exe
+```
+
+Одной командой (скрипт делает всё: сборка → portable → установщик → smoke-проверка):
 
 ```powershell
 scripts\build_local.bat              # portable + установщик (если стоит Inno Setup)
 scripts\build_local.bat -Run         # + smoke-проверка собранного exe
+scripts\build_local.bat -SkipInstaller
 ```
 
-- Требуется venv с зависимостями и PyInstaller: `pip install -r requirements.txt pyinstaller`.
-- Результаты: `Vodict-local-portable.zip`, приложение `dist\Vodict\Vodict.exe`, установщик `dist\installer\Vodict-setup-local.exe` (если установлен [Inno Setup 6](https://jrsoftware.org/isinfo.php): `winget install JRSoftware.InnoSetup`).
-- Docker для Windows-exe не нужен: PyInstaller собирает нативно; Linux-контейнер собрать Windows-бинарник не может.
-- Если Python установлен через **conda**, spec автоматически добавляет `ffi-8.dll` — зависимость `_ctypes` (в python.org-сборке libffi вшита).
+Результаты: `Vodict-local-portable.zip`, приложение `dist\Vodict\Vodict.exe`, установщик `dist\installer\Vodict-setup-local.exe`.
+
+### Сборка на macOS
+
+```bash
+brew install portaudio               # зависимость sounddevice
+pyinstaller --noconfirm packaging/vodict.spec        # → dist/Vodict.app
+# упаковка в .dmg (то же делает CI):
+cd dist && hdiutil create -volname Vodict -srcfolder "$(pwd)/Vodict.app" \
+  -ov -format UDZO "Vodict-macos-<версия>.dmg"
+```
+
+Проверка сборки: `xattr -cr dist/Vodict.app && open dist/Vodict.app`. Выдайте права: **Микрофон**, **Универсальный доступ**, **Мониторинг ввода** (Системные настройки → Конфиденциальность и безопасность).
+
+Приложение собирается **без подписи** (unsigned, arm64): на другом Mac снимите карантин — `xattr -cr /Applications/Vodict.app`. Для распространения без этих танцев нужна подписка Apple Developer Program и notarization.
+
+### Сборка через CI (обе платформы разом)
+
+- **Публикация релиза** на GitHub (тег, например `v0.2.0`) — workflow `Release builds` автоматически соберёт Windows zip + setup exe и macOS .dmg и прикрепит всё к релизу.
+- **Ручной запуск** (Actions → Release builds → Run workflow): билд уйдёт в **артефакты** запуска — удобно тестировать без релиза. Если заполнить поле `tag` существующим тегом — файлы прикрепятся к этому релизу.
+- На каждый push также бежит `CI` (тесты на Windows и macOS, Python 3.12).
+
+### Известные нюансы сборки
+
+- **Python из conda**: `_ctypes` требует внешнюю `ffi-8.dll` — spec добавляет её автоматически из `<conda>\Library\bin` (в python.org-сборке libffi вшита, поэтому в CI проблемы нет).
+- **sounddevice ≥ 0.5** на новых версиях Python не содержит скомпилированного модуля — работает через `cffi`; spec включает `cffi`/`_cffi_backend` в бандл.
+- **Windows Defender** может ругаться на неподписанный exe — см. раздел ниже (исключение на папку решает).
+- Шифрование и модель Whisper не входят в бандл: модель качается при первом выборе (в настройках виден прогресс).
 
 **Тестирование на чистом Mac** (сборка unsigned, arm64):
 
-1. Распакуйте архив, перенесите `Vodict.app` в «Программы».
+1. Распакуйте .dmg (или архив), перенесите `Vodict.app` в «Программы».
 2. Снимите карантин (приложение без подписи): `xattr -cr /Applications/Vodict.app`, затем обычный запуск.
 3. Выдайте права: Микрофон, Универсальный доступ, Мониторинг ввода (Системные настройки → Конфиденциальность и безопасность).
 4. Если что-то не работает — окно приложения → кнопка «🩺» → отправьте файл диагностики.
