@@ -7,6 +7,6 @@ platformdirs>=4.0.0
 pystray>=0.19.5
 pillow>=10.0.0
 tqdm>=4.60
-socksio>=1.4
+socksio>=1.0
 windows-toasts>=1.3; sys_platform == "win32"
 pyobjc-framework-Cocoa>=10.0; sys_platform == "darwin"
