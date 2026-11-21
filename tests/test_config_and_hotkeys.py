@@ -2,8 +2,9 @@
     python -m unittest discover -s tests -v
 """
 import json
-import tempfile
+import shutil
 import unittest
+import uuid
 from contextlib import contextmanager
 from importlib.util import find_spec
 from pathlib import Path
@@ -14,16 +15,17 @@ _TMP_BASE = Path(__file__).resolve().parent.parent / ".tmp-tests"
 
 
 def _fs_writable() -> bool:
-    """Проба записи тем же способом, каким пишет тест (временный подкаталог +
-    файл внутри): в песочницах может быть запрещён любой такой запись-паттерн —
-    тогда файловые тесты пропускаются (на реальной машине работают)."""
+    """Проба записи тем же способом, каким пишет тест. Важно: имена без
+    точки в начале и без chmod — песочницы часто запрещают и то и другое."""
+    probe_dir = _TMP_BASE / ("probe-" + uuid.uuid4().hex[:8])
     try:
-        _TMP_BASE.mkdir(exist_ok=True)
-        with tempfile.TemporaryDirectory(dir=_TMP_BASE) as tmp:
-            (Path(tmp) / ".probe").write_text("x", encoding="utf-8")
+        probe_dir.mkdir(parents=True, exist_ok=True)
+        (probe_dir / "probe.txt").write_text("x", encoding="utf-8")
         return True
     except OSError:
         return False
+    finally:
+        shutil.rmtree(probe_dir, ignore_errors=True)
 
 
 _FS_OK = _fs_writable()
@@ -32,11 +34,17 @@ _FS_OK = _fs_writable()
 @contextmanager
 def tmp_dir():
     """Временный каталог внутри проекта: в некоторых песочницах системная
-    %TEMP% недоступна на запись для дочерних процессов."""
+    %TEMP% недоступна на запись для дочерних процессов, а tempfile на
+    выходе делает chmod, который тоже может быть запрещён — поэтому
+    ручной подкаталог с обычным именем и shutil.rmtree без chmod."""
     base = _TMP_BASE
-    base.mkdir(exist_ok=True)
-    with tempfile.TemporaryDirectory(dir=base) as tmp:
-        yield tmp
+    base.mkdir(parents=True, exist_ok=True)
+    d = base / ("t-" + uuid.uuid4().hex[:8])
+    d.mkdir(parents=True, exist_ok=True)
+    try:
+        yield str(d)
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
 
 
 _SKIP_FS = unittest.skipUnless(_FS_OK, "нет прав на запись временных файлов (песочница)")
