@@ -39,8 +39,10 @@
 - главный поток: event loop фронтенда (tkinter/Qt/...);
 - фокус-поллер: фоновый daemon-поток FocusManager;
 - запись: звук пишет колбэк PortAudio (поток sounddevice);
-- watchdog записи: контроль max_duration / тишины;
-- распознавание и вставка: отдельный daemon-поток на каждый фрагмент.
+- watchdog записи: контроль max_duration / тишины / нулевого сигнала;
+- транскрибации: один daemon-воркер с FIFO-очередью. Нажатие хоткея во
+  время транскрибации начинает новую запись сразу, а предыдущий фрагмент
+  дозаменяется в фоне — state в этот момент 'recording'.
 """
 from __future__ import annotations
 
@@ -96,7 +98,11 @@ class DictationController:
         self.engine = None
         self._engine_lock = threading.Lock()
         self._state_lock = threading.RLock()
-        self.state = STATE_IDLE
+        # Запись и транскрибация могут сосуществовать: нажатие хоткея во
+        # время транскрибации начинает новую запись, а предыдущая фрагмент
+        # дозаменяется в фоне. Свойство state вычисляется из флагов.
+        self._recording = False
+        self._transcribing = False
         self._closed = False
 
         self.hotkey = HotkeyListener(
@@ -105,10 +111,30 @@ class DictationController:
         self.history = (HistoryStore(config.history_dir or None)
                         if config.history_enabled else None)
         self.downloads = DownloadManager(on_event=self._on_download_event)
-        self._pending_history: dict | None = None
         self._record_started: float | None = None
         self.ui = None
         self.tray = None
+        # Один воркер на все транскрибации (FIFO): движок не используется
+        # параллельно, при этом запись новой фразы идёт одновременно.
+        self._transcribe_queue: queue.Queue = queue.Queue()
+        threading.Thread(target=self._transcribe_worker, daemon=True,
+                         name="transcribe").start()
+
+    @property
+    def state(self) -> str:
+        if self._recording:
+            return STATE_RECORDING
+        if self._transcribing:
+            return STATE_TRANSCRIBING
+        return STATE_IDLE
+
+    def _transcription_done(self, message: str | None = None) -> None:
+        """Транскрибация завершена (успех или ошибка): снимаем флаг.
+        Если уже началась новая запись — state останется 'recording'."""
+        self._transcribing = False
+        self._post("state", self.state)
+        if message:
+            self._post("status", message)
 
     # ------------------------------------------------------------------
     # событие для UI: ("state"|"status"|"result"|"error"|"refresh"|
@@ -118,12 +144,16 @@ class DictationController:
             sounds.beep_error()
         self.events.put((kind, *payload))
 
-    def _set_state(self, state: str, message: str | None = None) -> None:
-        with self._state_lock:
-            self.state = state
-        self._post("state", state)
-        if message:
-            self._post("status", message)
+    def _transcribe_worker(self) -> None:
+        while not self._closed:
+            audio, rate, pending = self._transcribe_queue.get()
+            try:
+                self._transcribe_and_insert(audio, rate, pending)
+            except Exception:
+                log.exception("Сбой потока транскрибации")
+            finally:
+                self._transcribing = False
+                self._post("state", self.state)
 
     # ------------------------------------------------------------------
     # горячая клавиша / кнопка
@@ -135,9 +165,11 @@ class DictationController:
         elif event == "release":
             self.stop_recording()
         else:  # toggle
-            if self.state == STATE_RECORDING:
+            if self._recording:
                 self.stop_recording()
-            elif self.state == STATE_IDLE:
+            else:
+                # idle или transcribing: новую запись начинаем сразу,
+                # предыдущая транскрибация дозаменяется в фоне
                 self.start_recording()
 
     def on_button(self) -> None:
@@ -150,34 +182,34 @@ class DictationController:
         with self._state_lock:
             if self._closed:
                 return
-            if self.state == STATE_TRANSCRIBING:
-                self._post("status", "Секунду — ещё распознаю предыдущий фрагмент…")
-                return
-            if self.state != STATE_IDLE:
-                return
+            if self._recording:
+                return  # запись уже идёт
+            # Во время транскрибации новую запись начинаем сразу:
+            # предыдущий фрагмент дозаменяется в фоне (очередь транскрибаций).
             try:
                 self.recorder.start()
             except Exception as exc:
                 log.exception("Не удалось начать запись")
                 self._post("error", f"Не удалось начать запись: {exc}")
                 return
-            self.state = STATE_RECORDING
+            self._recording = True
             self._record_started = time.time()
             log.info("Запись начата")
             if self.config.sound_enabled:
                 sounds.beep_start()
-        self._post("state", STATE_RECORDING)
+        self._post("state", self.state)
         threading.Thread(target=self._recording_watchdog, daemon=True).start()
 
     def stop_recording(self) -> None:
         with self._state_lock:
-            if self.state != STATE_RECORDING:
+            if not self._recording:
                 return
             try:
                 audio, rate = self.recorder.stop()
             except Exception as exc:
                 log.exception("Не удалось остановить запись")
-                self._set_state(STATE_IDLE)
+                self._recording = False
+                self._post("state", self.state)
                 self._post("error", f"Не удалось остановить запись: {exc}")
                 return
             log.info("Запись остановлена: %.1f с",
@@ -188,19 +220,19 @@ class DictationController:
             peak = float(np.max(np.abs(audio))) if audio.size else 0.0
             if peak <= 0.0:
                 log.warning("Запись пуста: микрофон не передаёт сигнал")
-                self._set_state(STATE_IDLE)
+                self._recording = False
+                self._post("state", self.state)
                 self._post("error", "С микрофона не поступило звука — проверьте "
                                     "подключение, что он включён и не замучен, "
                                     "и что выбран в Настройках")
                 return
-            self.state = STATE_TRANSCRIBING
+            self._recording = False
+            self._transcribing = True
             if self.config.sound_enabled:
                 sounds.beep_end()
-            self._pending_history = self._begin_history(audio, rate)
-        self._post("state", STATE_TRANSCRIBING)
-        threading.Thread(
-            target=self._transcribe_and_insert, args=(audio, rate), daemon=True
-        ).start()
+            pending = self._begin_history(audio, rate)
+        self._post("state", self.state)
+        self._transcribe_queue.put((audio, rate, pending))
 
     def _recording_watchdog(self) -> None:
         low_since: float | None = None
@@ -279,9 +311,7 @@ class DictationController:
 
     # ------------------------------------------------------------------
     # распознавание + вставка + история
-    def _transcribe_and_insert(self, audio, rate) -> None:
-        pending = self._pending_history
-        self._pending_history = None
+    def _transcribe_and_insert(self, audio, rate, pending: dict | None) -> None:
         target = None
         transcribe_seconds = 0.0
         try:
@@ -291,7 +321,7 @@ class DictationController:
             text = (result.text or "").strip()
 
             if not text:
-                self._set_state(STATE_IDLE, "Речь не распознана")
+                self._transcription_done("Речь не распознана")
                 self._finish_history(pending, status="empty", result=result,
                                      transcribe_seconds=transcribe_seconds)
                 return
@@ -304,7 +334,7 @@ class DictationController:
             try:
                 self.inserter.insert(text, target)
             except Exception as exc:
-                self._set_state(STATE_IDLE)
+                self._transcription_done()
                 self._post("result", text)
                 self._post("error", f"Не удалось вставить текст: {exc}")
                 self._finish_history(pending, status="insert_error", text=text,
@@ -317,11 +347,10 @@ class DictationController:
                 self.hotkey.set_paused(False)
 
             if target is None:
-                self._set_state(
-                    STATE_IDLE, "Целевое окно не определено — текст остался в буфере"
-                )
+                self._transcription_done(
+                    "Целевое окно не определено — текст остался в буфере")
             else:
-                self._set_state(STATE_IDLE, "Вставлено ✓")
+                self._transcription_done("Вставлено ✓")
             log.info("Распознано %d символов за %.1f с (аудио %.1f с)",
                      len(text), transcribe_seconds,
                      float(pending.get("audio_seconds", 0.0)) if pending else 0.0)
@@ -331,14 +360,14 @@ class DictationController:
                                  target_title=self._target_title(target))
         except EngineUnavailable as exc:
             log.exception("Движок недоступен")
-            self._set_state(STATE_IDLE)
+            self._transcription_done()
             self._post("error", str(exc))
             self._finish_history(pending, status="error", result=result,
                                  transcribe_seconds=transcribe_seconds,
                                  error=str(exc))
         except Exception as exc:
             log.exception("Ошибка распознавания")
-            self._set_state(STATE_IDLE)
+            self._transcription_done()
             self._post("error", f"Ошибка распознавания: {exc}")
             self._finish_history(pending, status="error", result=result,
                                  transcribe_seconds=transcribe_seconds,
@@ -558,6 +587,8 @@ class DictationController:
             return
         self._closed = True
         log.info("Завершение работы приложения")
+        self._recording = False
+        self._transcribing = False
         try:
             self.hotkey.stop()
         except Exception:

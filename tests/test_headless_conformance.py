@@ -163,6 +163,19 @@ class HeadlessConformanceTests(unittest.TestCase):
         self.c.pause_hotkey(False)
         self.assertFalse(self.c.hotkey._paused)
 
+    def test_press_during_transcription_starts_new_recording(self):
+        """Хоткей во время транскрибации: новая запись сразу, старая
+        транскрибация дозаменяется в фоне и обе вставляются."""
+        self.c.start_recording()
+        self.c.stop_recording()
+        # предыдущий фрагмент ещё «транскрибируется» — начинаем новую запись
+        self.c.start_recording()
+        self.assertEqual(self.c.state, "recording")
+        self.c.stop_recording()
+        self.wait_idle()
+        self.assertEqual(self.c.state, "idle")
+        self.assertEqual(len(self.stub.inserted), 2)
+
     def test_shutdown_is_clean(self):
         self.c.shutdown()
         self.assertTrue(self.c._closed)
