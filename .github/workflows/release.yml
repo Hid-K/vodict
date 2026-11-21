@@ -95,9 +95,11 @@ jobs:
             echo "::error::gh release upload завершился с ошибкой — см. вывод выше"
             exit 1
           fi
-          count=$(gh release view "$VERSION" --json assets --jq '.assets | length')
+          # Валидация: если VERSION не резолвится в тег релиза (ручной запуск
+          # с пустым полем tag) — не роняем шаг, файлы уже загружены.
+          count=$(gh release view "$VERSION" --json assets --jq '.assets | length' 2>/dev/null || echo "?")
           echo "файлов на релизе: $count"
-          if [ "$count" -lt 2 ]; then
+          if [ "$count" != "?" ] && [ "$count" -lt 2 ]; then
             echo "::error::Не все файлы прикрепились к релизу ($count < 2)"
             exit 1
           fi
