@@ -9,3 +9,5 @@ dist/
 build/
 *.egg-info/
 config.json
+
+Vodict-local-portable.zip
