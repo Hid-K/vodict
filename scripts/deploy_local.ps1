@@ -1,4 +1,4 @@
-# Деплой Vodict в %LOCALAPPDATA%\Programs\Vodict БЕЗ Inno Setup.
+﻿# Деплой Vodict в %LOCALAPPDATA%\Programs\Vodict БЕЗ Inno Setup.
 # Запускать в PowerShell ОТ АДМИНИСТРАТОРА из папки scripts\:
 #   powershell -ExecutionPolicy Bypass -File scripts\deploy_local.ps1
 #
@@ -39,7 +39,8 @@ $lnk.TargetPath = Join-Path $target 'Vodict.exe'
 $lnk.WorkingDirectory = $target
 $lnk.Save()
 $desk = [Environment]::GetFolderPath('Desktop')
-$lnk2 = $wsh.CreateShortcut(Join-Path $desk 'Vodict.lnk')
+$desk_lnk = Join-Path $desk 'Vodict.lnk'
+$lnk2 = $wsh.CreateShortcut($desk_lnk)
 $lnk2.TargetPath = Join-Path $target 'Vodict.exe'
 $lnk2.WorkingDirectory = $target
 $lnk2.Save()
