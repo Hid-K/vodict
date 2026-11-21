@@ -21,6 +21,13 @@ import sys
 import zipfile
 from pathlib import Path
 
+# Кириллица в выводе не должна ронять скрипт в cp1252-консолях
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(errors="replace")
+    except Exception:
+        pass
+
 ROOT = Path(__file__).resolve().parent.parent
 DIST = ROOT / "dist"
 IS_WIN = platform.system() == "Windows"
@@ -112,6 +119,19 @@ def main() -> int:
         args.version = args_version
 
     print(f"Версия: {args.version} | платформа: {platform.system()}", flush=True)
+
+    # conda-окружение: Library\bin должен быть в PATH ДО запуска PyInstaller,
+    # иначе хук tkinter не найдёт tcl/tk DLL и бандл соберётся без GUI
+    # («DLL load failed while importing _tkinter»).
+    base = Path(getattr(sys, "base_prefix", sys.prefix))
+    conda_bin = base / "Library" / "bin"
+    if (conda_bin / "ffi-8.dll").exists():
+        os.environ["PATH"] = (
+            f"{conda_bin}{os.pathsep}{base / 'DLLs'}{os.pathsep}"
+            f"{base}{os.pathsep}{os.environ.get('PATH', '')}"
+        )
+        print(f"conda: добавлен PATH +{conda_bin}", flush=True)
+
     _run([sys.executable, "-m", "PyInstaller", "--noconfirm",
           str(ROOT / "packaging" / "vodict.spec")])
 

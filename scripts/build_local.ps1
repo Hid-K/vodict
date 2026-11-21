@@ -14,14 +14,7 @@ Set-Location $root
 $py = Join-Path $root '.venv\Scripts\python.exe'
 if (-not (Test-Path $py)) { $py = 'python' }
 
-# Если Python из conda — добавляем Library\bin и DLLs в PATH ДО сборки:
-# иначе PyInstaller не сможет допросить _tkinter (tcl86t.dll/tk86t.dll
-# лежат в Library\bin) и бандл соберётся без tcl/tk.
-$basePrefix = (& $py -c "import sys; print(sys.base_prefix)").Trim()
-if (Test-Path (Join-Path $basePrefix 'Library\bin\ffi-8.dll')) {
-    Write-Host "[0/4] conda-окружение: добавляю $basePrefix\Library\bin и DLLs в PATH"
-    $env:PATH = "$basePrefix\Library\bin;$basePrefix\DLLs;$basePrefix;$env:PATH"
-}
+# conda PATH-фикс теперь внутри build_app.py — единая точка.
 
 $flags = @('--zip', '--selftest')
 if (-not $SkipInstaller) { $flags += '--installer' }
