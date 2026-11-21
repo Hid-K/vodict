@@ -40,28 +40,15 @@ jobs:
       - name: Зависимости
         run: pip install -r requirements.txt pyinstaller
 
-      - name: Сборка (PyInstaller)
-        run: pyinstaller --noconfirm packaging/vodict.spec
-
-      - name: Архив (Windows, portable)
-        shell: pwsh
-        run: |
-          Compress-Archive -Path dist/Vodict/* `
-            -DestinationPath "Vodict-windows-$env:VERSION.zip"
-          Get-Item "Vodict-windows-$env:VERSION.zip" |
-            Select-Object Name, Length
-
-      - name: Инсталлятор (Inno Setup, обновление поверх старой версии)
+      - name: Сборка (build_app.py: exe + portable + установщик + selftest)
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           choco install innosetup -y --no-progress
           if ($LASTEXITCODE -ne 0) { throw "choco install innosetup failed" }
-          $iscc = Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"
-          if (-not (Test-Path $iscc)) { throw "ISCC не найден: $iscc" }
-          & $iscc /DMyAppVersion=$env:VERSION packaging/installer.iss
-          if ($LASTEXITCODE -ne 0) { throw "Сборка инсталлятора (ISCC) завершилась с ошибкой" }
-          Get-Item "dist/installer/Vodict-setup-*.exe"
+          python scripts/build_app.py --zip --installer --selftest --version $env:VERSION
+          if ($LASTEXITCODE -ne 0) { throw "build_app.py завершился с ошибкой" }
+          Get-Item "Vodict-windows-$env:VERSION.zip", "dist/installer/Vodict-setup-*.exe"
 
       - name: Контрольные суммы (SHA256)
         shell: pwsh
@@ -144,6 +131,9 @@ jobs:
         run: |
           test -d "dist/Vodict.app"
           ls -la dist/
+
+      - name: Проверка UI-стека (--selftest)
+        run: dist/Vodict.app/Contents/MacOS/Vodict --selftest
 
       - name: Упаковка (.dmg)
         run: |
