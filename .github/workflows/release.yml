@@ -3,9 +3,9 @@ name: Release builds
 # Сборка дистрибутивов и прикрепление к релизу.
 #
 # Два способа запуска:
-# 1) Публикация релиза на GitHub (релиз с тегом, например v0.1.0) —
-#    соберёт Vodict-windows-<тег>.zip и Vodict-setup-<тег>.exe и
-#    автоматически прикрепит их к релизу.
+# 1) Публикация релиза на GitHub (релиз с тегом, например v0.2.0) —
+#    соберёт Vodict-windows-<тег>.zip, Vodict-setup-<тег>.exe и
+#    Vodict-macos-<тег>.dmg и автоматически прикрепит их к релизу.
 # 2) Вручную (workflow_dispatch): билд уйдёт в артефакты; если заполнить
 #    «tag» — файлы прикрепятся к указанному существующему релизу.
 #
@@ -152,17 +152,22 @@ jobs:
             -ov -format UDZO "Vodict-macos-${VERSION}.dmg"
           ls -la Vodict-macos-*.dmg
 
-      - name: Прикрепить к релизу
+      - name: Прикрепить к релизу (macOS)
         if: github.event_name == 'release' || inputs.tag != ''
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          VERSION: ${{ github.event.release.tag_name || inputs.tag || github.ref_name }}
         run: |
-          gh release upload "$VERSION" --clobber Vodict-macos-*.dmg
+          set -x
+          ls -la dist/Vodict-macos-*.dmg
+          gh release upload "$VERSION" --clobber dist/Vodict-macos-*.dmg
+          gh release view "$VERSION" --json assets --jq '.assets[].name'
 
       - name: Артефакт (вне релиза)
         if: github.event_name != 'release'
         uses: actions/upload-artifact@v4
         with:
           name: Vodict-macos
-          path: Vodict-macos-*.dmg
+          path: dist/Vodict-macos-*.dmg
