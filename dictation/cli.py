@@ -31,6 +31,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="собрать диагностику в файл и выйти")
     parser.add_argument("--debug", action="store_true",
                         help="подробные логи (stderr + файл лога)")
+    parser.add_argument("--selftest", action="store_true",
+                        help="проверить загрузку UI-стека (tkinter) и выйти")
     return parser
 
 
@@ -114,6 +116,14 @@ def main(argv=None) -> int:
 
     if args.list_mics:
         return list_microphones()
+
+    if args.selftest:
+        # Импортирует bootstrap -> tkinter: детектирует сборку без tcl/tk.
+        from . import bootstrap  # noqa: F401
+        from .ui.window import DictationWindow  # noqa: F401
+
+        print("selftest OK")
+        return 0
 
     from .config import Config
 

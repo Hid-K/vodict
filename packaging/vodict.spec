@@ -91,6 +91,13 @@ for _ffi_dll in ("ffi-8.dll", "ffi.dll"):
     if os.path.exists(_candidate):
         binaries.append((_candidate, "."))
 
+# tcl/tk DLL из conda (для _tkinter): в python.org-сборке они в DLLs\
+# и подхватываются хуком автоматически.
+for _tk_dll in ("tcl86t.dll", "tk86t.dll", "zlib1.dll"):
+    _candidate = os.path.join(_conda_bin, _tk_dll)
+    if os.path.exists(_candidate):
+        binaries.append((_candidate, "."))
+
 is_mac = sys.platform == "darwin"
 
 a = Analysis(

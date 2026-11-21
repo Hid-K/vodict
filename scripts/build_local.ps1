@@ -15,6 +15,16 @@ Set-Location $root
 
 $py = Join-Path $root '.venv\Scripts\python.exe'
 if (-not (Test-Path $py)) { $py = 'python' }
+
+# Если Python из conda — добавляем Library\bin и DLLs в PATH ДО сборки:
+# иначе PyInstaller не сможет допросить _tkinter (tcl86t.dll/tk86t.dll
+# лежат в Library\bin) и бандл соберётся без tcl/tk.
+$basePrefix = (& $py -c "import sys; print(sys.base_prefix)").Trim()
+if (Test-Path (Join-Path $basePrefix 'Library\bin\ffi-8.dll')) {
+    Write-Host "[0/4] conda-окружение: добавляю $basePrefix\Library\bin и DLLs в PATH"
+    $env:PATH = "$basePrefix\Library\bin;$basePrefix\DLLs;$basePrefix;$env:PATH"
+}
+
 Write-Host "[1/4] PyInstaller: $py -m PyInstaller packaging/vodict.spec"
 & $py -m PyInstaller --noconfirm packaging/vodict.spec
 if ($LASTEXITCODE -ne 0) { throw 'PyInstaller завершился с ошибкой' }
@@ -47,12 +57,12 @@ else {
 }
 
 if ($Run) {
-    Write-Host '[4/4] Smoke: Vodict.exe --list-mics (проверка, что exe жив)'
-    # --list-mics не пишет в конфиг/журнал, поэтому безопасно даже при
-    # запущенном установленном Vodict (общий app.log был бы залочен).
-    & 'dist\Vodict\Vodict.exe' --list-mics | Out-Null
+    Write-Host '[4/4] Smoke: Vodict.exe --selftest (UI-стек + микрофоны в frozen-сборке)'
+    # --selftest импортирует bootstrap (tkinter) и не пишет в конфиг/журнал,
+    # поэтому безопасно даже при запущенном установленном Vodict.
+    cmd /c "dist\Vodict\Vodict.exe --selftest >nul 2>&1"
     if ($LASTEXITCODE -ne 0) { throw 'Smoke-прогон exe завершился с ошибкой' }
-    Write-Host '      exe отвечает: OK'
+    Write-Host '      exe отвечает: OK (UI-стек загружается)'
 }
 else {
     Write-Host '[4/4] Smoke пропущен (-Run для прогона exe)'
