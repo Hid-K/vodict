@@ -387,15 +387,15 @@ class HistoryDialog(tk.Toplevel):
         frm = ttk.Frame(self, padding=10)
         frm.pack(fill="both", expand=True)
 
-        columns = ("time", "sec", "speed", "model", "qual", "beam",
+        columns = ("time", "sec", "speed", "model", "dev", "qual", "beam",
                    "lang", "chars", "status", "text")
         headers = {"time": "Время", "sec": "Сек", "speed": "Скорость",
-                   "model": "Модель", "qual": "Кач", "beam": "Beam",
-                   "lang": "Яз", "chars": "Симв.",
+                   "model": "Модель", "dev": "Устр", "qual": "Кач",
+                   "beam": "Beam", "lang": "Яз", "chars": "Симв.",
                    "status": "Статус", "text": "Текст"}
-        widths = {"time": 145, "sec": 50, "speed": 65, "model": 150,
-                  "qual": 55, "beam": 40, "lang": 35, "chars": 45,
-                  "status": 70, "text": 230}
+        widths = {"time": 145, "sec": 50, "speed": 65, "model": 140,
+                  "dev": 45, "qual": 55, "beam": 40, "lang": 35,
+                  "chars": 45, "status": 70, "text": 200}
         self.tree = ttk.Treeview(frm, columns=columns, show="headings", height=16)
         for col in columns:
             self.tree.heading(col, text=headers[col])
@@ -428,7 +428,7 @@ class HistoryDialog(tk.Toplevel):
         history = self.controller.history
         if history is None:
             self.tree.insert("", "end",
-                             values=("—", "", "", "", "", "", "", "", "",
+                             values=("—", "", "", "", "", "", "", "", "", "",
                                      "история отключена в настройках"))
             return
         status_ru = {"ok": "✓", "empty": "пусто", "insert_error": "ошибка вст.",
@@ -441,6 +441,7 @@ class HistoryDialog(tk.Toplevel):
                 f"{float(r.get('seconds', 0)):.1f}",
                 f"×{speed}" if speed else "—",
                 r.get("model", ""),
+                r.get("device_used", ""),
                 r.get("compute_type", ""),
                 r.get("beam_size", ""),
                 r.get("language", ""),
