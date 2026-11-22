@@ -135,10 +135,18 @@ def main() -> int:
     _run([sys.executable, "-m", "PyInstaller", "--noconfirm",
           str(ROOT / "packaging" / "vodict.spec")])
 
+    if IS_WIN:
+        # Файлы, созданные из песочницы с низким уровнем целостности,
+        # наследуют Low-метку (NW): запущенный из них процесс не может
+        # писать в Temp и т.п. — «Ошибка 5» у пользователя. Выставляем
+        # средний уровень целостности всем артефактам.
+        _run(["icacls", str(DIST), "/setintegritylevel", "(OI)(CI)", "M", "/t"])
+
     if args.selftest:
         _selftest()
     if args.zip and IS_WIN:
-        _portable_zip(args.version)
+        zip_path = _portable_zip(args.version)
+        _run(["icacls", str(zip_path), "/setintegritylevel", "M"])
     if args.installer:
         _installer(args.version)
 
