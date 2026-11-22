@@ -102,6 +102,26 @@ def _installer(version: str) -> Path | None:
     return installer
 
 
+def _fix_integrity(path: Path, recursive: bool = False) -> None:
+    """Сброс Low-метки целостности на артефактах (Windows).
+
+    Файлы, созданные из песочниц с низким IL, наследуют Low-метку (NW):
+    запущенный из них процесс не может писать в Temp — «Ошибка 5».
+    Некритично: если команда недоступна (сборка из такой же песочницы),
+    предупреждаем и продолжаем — пользователь выполнит её вручную.
+    """
+    if not IS_WIN:
+        return
+    cmd = ["icacls", str(path), "/setintegritylevel", "M"]
+    if recursive:
+        cmd.append("/t")
+    completed = subprocess.run(cmd, cwd=str(ROOT))
+    if completed.returncode != 0:
+        print(f"ПРЕДУПРЕЖДЕНИЕ: не удалось выставить целостность {path} "
+              f"(exit {completed.returncode}). Выполните вручную от "
+              f"пользователя: {' '.join(cmd)}", flush=True)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Сборка Vodict (CI и локально)")
     ap.add_argument("--version", default=None,
@@ -136,19 +156,17 @@ def main() -> int:
           str(ROOT / "packaging" / "vodict.spec")])
 
     if IS_WIN:
-        # Файлы, созданные из песочницы с низким уровнем целостности,
-        # наследуют Low-метку (NW): запущенный из них процесс не может
-        # писать в Temp и т.п. — «Ошибка 5» у пользователя. Выставляем
-        # средний уровень целостности всем артефактам.
-        _run(["icacls", str(DIST), "/setintegritylevel", "(OI)(CI)", "M", "/t"])
+        _fix_integrity(DIST, recursive=True)
 
     if args.selftest:
         _selftest()
     if args.zip and IS_WIN:
         zip_path = _portable_zip(args.version)
-        _run(["icacls", str(zip_path), "/setintegritylevel", "M"])
+        _fix_integrity(zip_path)
     if args.installer:
-        _installer(args.version)
+        installer = _installer(args.version)
+        if installer is not None:
+            _fix_integrity(installer)
 
     print("Готово.", flush=True)
     return 0
