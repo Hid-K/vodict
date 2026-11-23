@@ -107,8 +107,9 @@ def _fix_integrity(path: Path, recursive: bool = False) -> None:
 
     Файлы, созданные из песочниц с низким IL, наследуют Low-метку (NW):
     запущенный из них процесс не может писать в Temp — «Ошибка 5».
-    Некритично: если команда недоступна (сборка из такой же песочницы),
-    предупреждаем и продолжаем — пользователь выполнит её вручную.
+    Некритично: если рекурсивная установка не сработала, пробуем
+    пофайлово; если и это недоступно (сборка из такой же песочницы) —
+    предупреждаем и продолжаем.
     """
     if not IS_WIN:
         return
@@ -116,10 +117,25 @@ def _fix_integrity(path: Path, recursive: bool = False) -> None:
     if recursive:
         cmd.append("/t")
     completed = subprocess.run(cmd, cwd=str(ROOT))
-    if completed.returncode != 0:
-        print(f"ПРЕДУПРЕЖДЕНИЕ: не удалось выставить целостность {path} "
-              f"(exit {completed.returncode}). Выполните вручную от "
-              f"пользователя: {' '.join(cmd)}", flush=True)
+    if completed.returncode == 0:
+        return
+    # рекурсивный проход не сработал (напр. 1299 на каталоге) — пофайлово
+    print(f"ПРЕДУПРЕЖДЕНИЕ: icacls на {path} не сработал ({completed.returncode}), "
+          f"пробую пофайлово...", flush=True)
+    failed = 0
+    files = [path] if not recursive else sorted(path.rglob("*"))
+    for f in files:
+        if not f.is_file():
+            continue
+        c = subprocess.run(["icacls", str(f), "/setintegritylevel", "M"],
+                           cwd=str(ROOT), capture_output=True)
+        if c.returncode != 0:
+            failed += 1
+    if failed:
+        print(f"ПРЕДУПРЕЖДЕНИЕ: {failed} файл(ов) не удалось исправить. "
+              f"Выполните вручную от пользователя: {' '.join(cmd)}", flush=True)
+    else:
+        print("Целостность выставлена пофайлово ✓", flush=True)
 
 
 def main() -> int:
