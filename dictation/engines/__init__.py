@@ -11,5 +11,7 @@ from . import faster_whisper_engine  # noqa: F401
 from . import whisper_ref_engine     # noqa: F401
 from . import openai_api_engine      # noqa: F401
 from . import tone_engine            # noqa: F401
+from . import vosk_engine            # noqa: F401
+from . import sherpa_engine          # noqa: F401
 
 __all__ = ["available_engines", "create_engine", "register_engine"]

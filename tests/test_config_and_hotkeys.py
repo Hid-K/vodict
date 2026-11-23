@@ -192,7 +192,9 @@ class HotkeyTests(unittest.TestCase):
         from dictation.engines.registry import available_engines
 
         names = set(available_engines())
-        self.assertLessEqual({"faster-whisper", "openai-whisper", "openai-api", "tone"}, names)
+        self.assertLessEqual(
+            {"faster-whisper", "openai-whisper", "openai-api", "tone",
+             "vosk", "sherpa"}, names)
 
 
 if __name__ == "__main__":
