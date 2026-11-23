@@ -58,6 +58,15 @@ python main.py
 pip install -r requirements-optional.txt   # openai-whisper и/или openai
 ```
 
+**T-one** — потоковое распознавание русской речи (Т-Технологии, 71M Conformer, Apache-2.0). Работает на CPU через ONNX Runtime **без torch**, только русский язык, быстрая фрагмент-обработка и встроенный поиск границ фраз:
+
+```bash
+pip install git+https://github.com/voicekit-team/T-one
+pip install onnxruntime pyctcdecode kenlm
+```
+
+> Если `kenlm` не собирается — движок автоматически переключится на greedy-декодер. Модель (~250 МБ) скачается с HuggingFace (`t-tech/T-one`) при первом запуске движка.
+
 Движок выбирается в «Настройки» окна или через `--engine`. Для облачного `openai-api` укажите API-ключ в настройках или переменную `OPENAI_API_KEY`.
 
 ---

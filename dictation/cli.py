@@ -13,7 +13,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--config", help="путь к config.json (по умолчанию — в "
                                          "пользовательской папке конфигов)")
-    parser.add_argument("--engine", help="движок: faster-whisper | openai-whisper | openai-api")
+    parser.add_argument("--engine", help="движок: faster-whisper | openai-whisper | openai-api | tone")
     parser.add_argument("--model", dest="model_size", help="размер модели whisper")
     parser.add_argument("--language", help='язык речи: "ru", "en"... (по умолчанию — авто)')
     parser.add_argument("--hotkey", help='комбинация клавиш, напр. "ctrl+alt"')

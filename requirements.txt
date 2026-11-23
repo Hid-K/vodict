@@ -10,3 +10,8 @@ tqdm>=4.60
 socksio>=1.0
 windows-toasts>=1.3; sys_platform == "win32"
 pyobjc-framework-Cocoa>=10.0; sys_platform == "darwin"
+
+# --- Опциональный движок T-one (русский, стриминг, CPU) -------------------
+# Установка: pip install git+https://github.com/voicekit-team/T-one
+#            pip install onnxruntime pyctcdecode kenlm
+# (ставится только если нужен движок tone; faster-whisper при этом не требуется)
