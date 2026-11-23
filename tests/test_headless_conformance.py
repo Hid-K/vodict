@@ -48,6 +48,7 @@ class _StubInserter:
 
 class _StubRecorder:
     requested_rate = 16000
+    actual_rate = 16000
     level = 0.0
 
     def start(self):
