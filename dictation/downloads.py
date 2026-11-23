@@ -21,7 +21,39 @@ import time
 from pathlib import Path
 from typing import Callable
 
-REPO_TEMPLATE = "Systran/faster-whisper-{model}"
+# Авторитетное соответствие «имя модели -> репозиторий HuggingFace».
+# Источник: faster_whisper.utils._MODELS (синхронизируется при обновлении
+# faster-whisper). ВАЖНО: наивный шаблон Systran/faster-whisper-{model}
+# даёт несуществующие репозитории — turbo живёт у mobiuslabsgmbh,
+# distil-* — в Systran/faster-distil-whisper-*, "large" — алиас large-v3.
+REPOS = {
+    "tiny": "Systran/faster-whisper-tiny",
+    "tiny.en": "Systran/faster-whisper-tiny.en",
+    "base": "Systran/faster-whisper-base",
+    "base.en": "Systran/faster-whisper-base.en",
+    "small": "Systran/faster-whisper-small",
+    "small.en": "Systran/faster-whisper-small.en",
+    "medium": "Systran/faster-whisper-medium",
+    "medium.en": "Systran/faster-whisper-medium.en",
+    "large-v1": "Systran/faster-whisper-large-v1",
+    "large-v2": "Systran/faster-whisper-large-v2",
+    "large-v3": "Systran/faster-whisper-large-v3",
+    "large": "Systran/faster-whisper-large-v3",
+    "large-v3-turbo": "mobiuslabsgmbh/faster-whisper-large-v3-turbo",
+    "turbo": "mobiuslabsgmbh/faster-whisper-large-v3-turbo",
+    "distil-small.en": "Systran/faster-distil-whisper-small.en",
+    "distil-medium.en": "Systran/faster-distil-whisper-medium.en",
+    "distil-large-v2": "Systran/faster-distil-whisper-large-v2",
+    "distil-large-v3": "Systran/faster-distil-whisper-large-v3",
+    "distil-large-v3.5": "distil-whisper/distil-large-v3.5-ct2",
+}
+try:
+    # Обновляемся из установленного faster-whisper, если он добавил новые
+    from faster_whisper.utils import _MODELS as _FW_MODELS  # noqa: PLC0415
+    REPOS.update(_FW_MODELS)
+except Exception:
+    pass
+
 ALLOW_PATTERNS = [
     "config.json",
     "preprocessor_config.json",
@@ -223,7 +255,7 @@ class DownloadManager:
     def _repo(model: str) -> str:
         if "/" in model:  # пользовательский repo_id с HuggingFace
             return model
-        return REPO_TEMPLATE.format(model=model)
+        return REPOS.get(model, f"Systran/faster-whisper-{model}")
 
     def _download(self, model: str) -> None:
         from huggingface_hub import snapshot_download
