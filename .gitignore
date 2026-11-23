@@ -13,3 +13,10 @@ config.json
 Vodict-local-portable.zip
 
 Vodict-windows-*.zip
+
+pip-build-env-*/
+pip-build-tracker-*/
+pip-ephem-wheel-cache-*/
+pip-install-*/
+pip-modern-metadata-*/
+pip-req-build-*/
