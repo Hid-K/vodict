@@ -20,3 +20,6 @@ pip-ephem-wheel-cache-*/
 pip-install-*/
 pip-modern-metadata-*/
 pip-req-build-*/
+
+pip-metadata-*/
+pip-unpack-*/
