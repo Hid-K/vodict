@@ -79,3 +79,14 @@ class TranscriptionEngine(ABC):
 
     def describe(self) -> str:
         return self.label
+
+    def open_stream(self, sample_rate: int = 16000):
+        """Стриминговая сессия распознавания «на лету» (опционально).
+
+        Возвращает объект с методами:
+          feed(audio16k_float32, sample_rate) -> str  # промежуточный текст
+          finalize() -> str                            # полный текст фрагмента
+        или None, если движок не поддерживает live-режим — тогда контроллер
+        использует обычный батчевый путь (transcribe после остановки записи).
+        """
+        return None

@@ -64,6 +64,9 @@ class ToneEngine(TranscriptionEngine):
         self.actual_device = "cpu (onnx)"
         self.actual_compute_type = "ctc-int32"
 
+    def open_stream(self, sample_rate: int = 16000):
+        return _ToneStreamSession(self._pipeline)
+
     def transcribe(self, audio: np.ndarray, sample_rate: int = 16000) -> TranscriptionResult:
         duration = len(audio) / float(sample_rate) if sample_rate else None
 
@@ -85,3 +88,45 @@ class ToneEngine(TranscriptionEngine):
 
     def describe(self) -> str:
         return f"{self.label} — {self._decoder}"
+
+
+class _ToneStreamSession:
+    """Live-сессия T-one: накопление 8к-int32 буфера и чанк-обработка."""
+
+    CHUNK = 2400  # 300 мс @ 8 кГц
+
+    def __init__(self, pipeline) -> None:
+        self._pipeline = pipeline
+        self._buf = np.zeros(0, dtype=np.int32)
+        self._state = None
+        self._phrases: list[str] = []
+
+    def feed(self, audio: np.ndarray, sample_rate: int = 16000) -> str:
+        audio8 = ensure_rate(np.asarray(audio, dtype=np.float32), sample_rate, 8000)
+        if audio8.size == 0:
+            return ""
+        pcm = np.clip(audio8 * 32768.0, -32768, 32767).astype(np.int32)
+        self._buf = np.concatenate([self._buf, pcm])
+        new: list[str] = []
+        while self._buf.size >= self.CHUNK:
+            chunk = self._buf[:self.CHUNK]
+            self._buf = self._buf[self.CHUNK:]
+            phrases, self._state = self._pipeline.forward(chunk, self._state)
+            for p in phrases:
+                self._phrases.append(p.text)
+                new.append(p.text)
+        return "\n".join(new).strip()
+
+    def finalize(self) -> str:
+        # добираем хвост меньше чанка
+        if self._buf.size:
+            chunk = np.zeros(self.CHUNK, dtype=np.int32)
+            chunk[:self._buf.size] = self._buf
+            self._buf = np.zeros(0, dtype=np.int32)
+            phrases, self._state = self._pipeline.forward(chunk, self._state)
+            for p in phrases:
+                self._phrases.append(p.text)
+        phrases, _ = self._pipeline.finalize(self._state)
+        for p in phrases:
+            self._phrases.append(p.text)
+        return "\n".join(self._phrases).strip()

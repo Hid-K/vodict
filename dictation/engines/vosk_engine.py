@@ -47,6 +47,11 @@ class VoskEngine(TranscriptionEngine):
         self.actual_device = "cpu (kaldi)"
         self.actual_compute_type = "kaldi"
 
+    def open_stream(self, sample_rate: int = 16000):
+        from vosk import KaldiRecognizer
+
+        return _VoskStreamSession(KaldiRecognizer(self._model, sample_rate))
+
     def transcribe(self, audio: np.ndarray, sample_rate: int = 16000) -> TranscriptionResult:
         from vosk import KaldiRecognizer  # локальный импорт: быстрый старт
 
@@ -68,3 +73,21 @@ class VoskEngine(TranscriptionEngine):
     def describe(self) -> str:
         return f"{self.label} — {self._model.ModelPath()}" if hasattr(
             self._model, "ModelPath") else self.label
+
+
+class _VoskStreamSession:
+    """Live-сессия Vosk: PartialResult во время записи, FinalResult в конце."""
+
+    def __init__(self, recognizer) -> None:
+        self._rec = recognizer
+
+    def feed(self, audio: np.ndarray, sample_rate: int = 16000) -> str:
+        pcm = (np.clip(np.asarray(audio, dtype=np.float32), -1.0, 1.0)
+               * 32767).astype(np.int16).tobytes()
+        self._rec.AcceptWaveform(pcm)
+        partial = json.loads(self._rec.PartialResult()).get("partial", "")
+        return partial.strip()
+
+    def finalize(self) -> str:
+        result = json.loads(self._rec.FinalResult()).get("text", "")
+        return result.strip()

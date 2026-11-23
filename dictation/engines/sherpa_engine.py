@@ -71,6 +71,9 @@ class SherpaEngine(TranscriptionEngine):
         self.actual_device = "cpu (onnx)"
         self.actual_compute_type = "onnx"
 
+    def open_stream(self, sample_rate: int = 16000):
+        return _SherpaStreamSession(self._recognizer)
+
     def transcribe(self, audio: np.ndarray, sample_rate: int = 16000) -> TranscriptionResult:
         audio = np.asarray(audio, dtype=np.float32)
         stream = self._recognizer.create_stream()
@@ -85,3 +88,28 @@ class SherpaEngine(TranscriptionEngine):
 
     def describe(self) -> str:
         return self.label
+
+
+class _SherpaStreamSession:
+    """Live-сессия Sherpa-onnx: расшифровка накопленного аудио на лету."""
+
+    def __init__(self, recognizer) -> None:
+        self._rec = recognizer
+        self._stream = recognizer.create_stream()
+
+    def feed(self, audio: np.ndarray, sample_rate: int = 16000) -> str:
+        audio = np.asarray(audio, dtype=np.float32)
+        if audio.size == 0:
+            return ""
+        self._stream.accept_waveform(sample_rate, audio)
+        while self._rec.is_ready(self._stream):
+            self._rec.decode(self._stream)
+        return self._rec.get_result(self._stream).strip()
+
+    def finalize(self) -> str:
+        self._stream.input_finished()
+        while self._rec.is_ready(self._stream):
+            self._rec.decode(self._stream)
+        text = self._rec.get_result(self._stream).strip()
+        self._stream = self._rec.create_stream()
+        return text
