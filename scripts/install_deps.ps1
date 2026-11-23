@@ -1,15 +1,24 @@
 ﻿# Установка всех зависимостей Vodict в venv проекта (видимый прогресс).
 # Запуск в ОБЫЧНОМ терминале из корня проекта:
 #   scripts\install_deps.bat
-# Если PyPI недоступен напрямую — можно включить прокси:
+# Если PyPI качается медленно — зеркало (быстро из РФ):
+#   scripts\install_deps.bat -IndexUrl https://mirrors.aliyun.com/pypi/simple/
+# Если нужен прокси:
 #   scripts\install_deps.bat -Proxy socks5://127.0.0.1:10808
 param(
-    [string]$Proxy = ""
+    [string]$Proxy = "",
+    [string]$IndexUrl = ""
 )
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 $py = Join-Path $root '.venv\Scripts\python.exe'
 if (-not (Test-Path $py)) { $py = 'python' }
+
+$indexArgs = @()
+if ($IndexUrl -ne "") {
+    $indexArgs = @('--index-url', $IndexUrl)
+    Write-Host "Зеркало PyPI: $IndexUrl"
+}
 
 $proxyArgs = @()
 if ($Proxy -ne "") {
@@ -22,14 +31,14 @@ if ($Proxy -ne "") {
 Write-Host ''
 Write-Host '=== 1/3: основной набор (faster-whisper, ctranslate2, av, onnxruntime...) ===' -ForegroundColor Cyan
 Write-Host '   (~400 МБ загрузки — это долго, но НЕ зависание)' -ForegroundColor Yellow
-& $py -m pip install --progress-bar on @proxyArgs -r (Join-Path $root 'requirements.txt') pyinstaller
+& $py -m pip install --progress-bar on @indexArgs @proxyArgs -r (Join-Path $root 'requirements.txt') pyinstaller
 if ($LASTEXITCODE -ne 0) { Write-Host 'ОШИБКА этапа 1 — пришлите вывод выше' -ForegroundColor Red; exit 1 }
 
 Write-Host ''
 Write-Host '=== 2/3: движки Vosk + Sherpa-onnx + pyctcdecode ===' -ForegroundColor Cyan
 foreach ($pkg in @('vosk>=0.3.45', 'sherpa-onnx>=1.10.30', 'pyctcdecode>=0.2.0')) {
     Write-Host "  ставлю: $pkg"
-    & $py -m pip install --progress-bar on @proxyArgs $pkg
+    & $py -m pip install --progress-bar on @indexArgs @proxyArgs $pkg
     if ($LASTEXITCODE -ne 0) {
         Write-Host "  ПРЕДУПРЕЖДЕНИЕ: $pkg не установился — этот движок будет недоступен" -ForegroundColor Yellow
     }
@@ -37,7 +46,7 @@ foreach ($pkg in @('vosk>=0.3.45', 'sherpa-onnx>=1.10.30', 'pyctcdecode>=0.2.0')
 
 Write-Host ''
 Write-Host '=== 3/3: движок T-one (из GitHub) ===' -ForegroundColor Cyan
-& $py -m pip install --progress-bar on @proxyArgs 'git+https://github.com/voicekit-team/T-one'
+& $py -m pip install --progress-bar on @indexArgs @proxyArgs 'git+https://github.com/voicekit-team/T-one'
 if ($LASTEXITCODE -ne 0) {
     Write-Host '  ПРЕДУПРЕЖДЕНИЕ: T-one не установился (проверьте доступ к GitHub или включите прокси)' -ForegroundColor Yellow
 }
