@@ -93,6 +93,23 @@ def _installer(version: str) -> Path | None:
         return None
     out_dir = DIST / "installer"
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Если старый установщик занят другим процессом (просмотрщик, Блокнот,
+    # антивирус) — ISCC отчитается невнятным «in use». Проверяем заранее
+    # и даём понятное сообщение.
+    target = out_dir / f"Vodict-setup-{version}.exe"
+    if target.exists():
+        try:
+            with open(target, "r+b"):
+                pass
+        except PermissionError as exc:
+            raise SystemExit(
+                f"Не могу перезаписать {target}: файл занят другим процессом. "
+                f"Закройте программу, которая его держит (просмотрщик, "
+                f"Блокнот, антивирус), удалите файл вручную и запустите "
+                f"сборку снова. Подробно: {exc}"
+            )
+
     _run([str(iscc), f"/DMyAppVersion={version}", str(ROOT / "packaging" / "installer.iss")])
     installer = out_dir / f"Vodict-setup-{version}.exe"
     if not installer.exists():
@@ -155,6 +172,17 @@ def main() -> int:
         args.version = args_version
 
     print(f"Версия: {args.version} | платформа: {platform.system()}", flush=True)
+
+    # Предупреждение о недостающих пакетах движков (не попадут в бандл)
+    import importlib.util  # noqa: PLC0415
+
+    missing = [m for m in ("vosk", "sherpa_onnx", "tone", "pyctcdecode")
+               if importlib.util.find_spec(m) is None]
+    if missing:
+        print(f"ПРЕДУПРЕЖДЕНИЕ: в окружении сборки нет пакетов движков: "
+              f"{', '.join(missing)} — эти движки не попадут в бандл. "
+              f"Установите: pip install -r requirements-engines.txt",
+              flush=True)
 
     # conda-окружение: Library\bin должен быть в PATH ДО запуска PyInstaller,
     # иначе хук tkinter не найдёт tcl/tk DLL и бандл соберётся без GUI
