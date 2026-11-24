@@ -989,6 +989,16 @@ class SettingsDialog(tk.Toplevel):
                       "по горячей клавише; цвет иконки трея показывает состояние. "
                       "Выход из программы — меню иконки трея → «Выход».")
 
+    def _set_whisper_fields_enabled(self, enabled: bool) -> None:
+        """Стриминговые движки не используют настройки Whisper."""
+        state = "normal" if enabled else "disabled"
+        for w in (self.model_cb, self.del_cb, self.device_cb, self.compute_cb,
+                  self.beam_cb, self.vad_cb, self.prompt_entry):
+            if isinstance(w, ttk.Combobox) and enabled:
+                w.configure(state="readonly")
+            else:
+                w.configure(state=state)
+
     # ------------------------------------------------------------------
     # заполнение полей из конфига
     def _load(self, cfg: Config) -> None:
@@ -1012,6 +1022,8 @@ class SettingsDialog(tk.Toplevel):
         self.mode_var.set(next((lbl for lbl, val in MODES if val == cfg.hotkey_mode),
                                MODES[0][0]))
 
+        self._set_whisper_fields_enabled(
+            cfg.engine in ("faster-whisper", "openai-whisper"))
         self.insert_var.set(next((lbl for lbl, val in INSERTS
                                   if val == cfg.insert_method), INSERTS[0][0]))
         self.restore_var.set(cfg.restore_clipboard)
