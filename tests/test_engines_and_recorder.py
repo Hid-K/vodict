@@ -670,6 +670,14 @@ class VoskEngineTests(ProjectRunDirTest):
         eng = VoskEngine(model_size=str(model_dir))
         self.assertIn("manual", str(eng._model.path))
 
+    def test_whisper_model_name_falls_back_to_auto_download(self):
+        """Регрессия: «large-v3-turbo» из конфига не является путём —
+        Vosk должен использовать автозагрузку, а не падать."""
+        from dictation.engines.vosk_engine import VoskEngine
+
+        eng = VoskEngine(model_size="large-v3-turbo")
+        self.assertIn("vosk-model", str(eng._model.path))
+
     def test_batch_transcribe(self):
         from dictation.engines.vosk_engine import VoskEngine
 

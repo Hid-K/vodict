@@ -41,7 +41,9 @@ class VoskEngine(TranscriptionEngine):
 
         SetLogLevel(-1)
         path = (model_size or "").strip()
-        if not path:
+        # «medium», «large-v3-turbo» и прочие имена моделей Whisper —
+        # не пути: автозагрузка русской модели Vosk
+        if not (path and Path(path).is_dir()):
             path = str(self._ensure_auto_model(progress_cb))
         if not Path(path).is_dir():
             raise EngineUnavailable(f"Папка модели Vosk не найдена: {path}")
