@@ -57,6 +57,10 @@ class _StubRecorder:
     def elapsed(self) -> float:
         return 0.0
 
+    def pending_audio(self):
+        import numpy as np
+        return np.zeros(0, dtype=np.float32)
+
     def stop(self):
         import numpy as np
         audio = (np.sin(np.linspace(0, 90, 1600)) * 0.3).astype(np.float32)
@@ -185,6 +189,34 @@ class HeadlessConformanceTests(unittest.TestCase):
         self.assertEqual(self.c.state, "idle")
         kinds = [e[0] for e in self._drain()]
         self.assertEqual(kinds.count("result"), 2)
+
+    def test_live_streaming_session(self):
+        """Live-режим: сессия движка получает финализацию и вставку."""
+        class _StubSession:
+            def feed(self, audio, rate):
+                return "частичный текст"
+
+            def finalize(self):
+                return "живой текст"
+
+        class _StubStreamEngine:
+            actual_device = "cpu"
+            actual_compute_type = "test"
+
+            def open_stream(self, sample_rate=16000):
+                return _StubSession()
+
+        self.c.engine = _StubStreamEngine()
+        self.c.start_recording()
+        self.c._pump_live()  # пустой хвост — сессия остаётся активной
+        self.c.stop_recording()
+        t0 = time.monotonic()
+        while self.c.state != "idle" and time.monotonic() - t0 < 5:
+            time.sleep(0.02)
+        self.assertEqual(self.c.state, "idle")
+        self.assertEqual(self.stub.inserted, ["живой текст"])
+        kinds = [e[0] for e in self._drain()]
+        self.assertIn("result", kinds)
 
     def test_shutdown_is_clean(self):
         self.c.shutdown()

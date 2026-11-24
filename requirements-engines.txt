@@ -1,0 +1,8 @@
+# Движки распознавания T-one / Vosk / Sherpa (опционально, см. README
+# «Опциональные движки»). kenlm не включён сюда: на Windows он требует
+# компилятора — без него движок T-one автоматически использует
+# greedy-декодер (поставить отдельно, если нужен beam-search).
+vosk>=0.3.45
+sherpa-onnx>=1.10.30
+pyctcdecode>=0.2.0
+git+https://github.com/voicekit-team/T-one
