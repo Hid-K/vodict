@@ -1,4 +1,4 @@
-# Локальная сборка Vodict: тонкая обёртка над scripts/build_app.py
+﻿# Локальная сборка Vodict: тонкая обёртка над scripts/build_app.py
 # (единая логика сборки с CI — одинаковые шаги и проверки).
 #
 #   scripts\build_local.bat              # exe + portable + установщик + smoke
