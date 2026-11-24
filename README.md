@@ -58,31 +58,6 @@ python main.py
 pip install -r requirements-optional.txt   # openai-whisper и/или openai
 ```
 
-**T-one** — потоковое распознавание русской речи (Т-Технологии, 71M Conformer, Apache-2.0). Работает на CPU через ONNX Runtime **без torch**, только русский язык, быстрая фрагмент-обработка и встроенный поиск границ фраз:
-
-```bash
-pip install git+https://github.com/voicekit-team/T-one
-pip install onnxruntime pyctcdecode kenlm
-```
-
-> Если `kenlm` не собирается — движок автоматически переключится на greedy-декодер. Модель (~250 МБ) скачается с HuggingFace (`t-tech/T-one`) при первом запуске движка.
-
-**Vosk** — офлайн-стриминг на 20+ языков (ru, en-us, de, es, fr...), лёгкий и быстрый на CPU:
-
-```bash
-pip install vosk
-```
-
-Скачайте модель для нужного языка с [alphacephei.com/vosk/models](https://alphacephei.com/vosk/models) (например, `vosk-model-small-ru-0.22`), распакуйте и укажите **путь к распакованной папке** в поле «Модель» настроек.
-
-**Sherpa-onnx** — современные стриминговые Zipformer-модели, включая мультиязычную (ru + en + арабский, японский, китайский и др. — 8 языков в одной модели):
-
-```bash
-pip install sherpa-onnx
-```
-
-Скачайте модель отсюда: [releases sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx/releases) (файлы `sherpa-onnx-streaming-zipformer-*.tar.bz2`), распакуйте и укажите **путь к папке модели** в поле «Модель» настроек.
-
 Движок выбирается в «Настройки» окна или через `--engine`. Для облачного `openai-api` укажите API-ключ в настройках или переменную `OPENAI_API_KEY`.
 
 ---

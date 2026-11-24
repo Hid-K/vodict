@@ -100,7 +100,6 @@ class MicrophoneRecorder:
         self._stream: sd.InputStream | None = None
         self._frames: list[np.ndarray] = []
         self._lock = threading.Lock()
-        self._consumed = 0  # сколько сэмплов уже отдано в live-сессию
         self.level = 0.0
         self.peak = 0.0  # максимальный уровень за сессию записи
         self.started_at: float | None = None
@@ -114,7 +113,6 @@ class MicrophoneRecorder:
             self._frames = []
         self.level = 0.0
         self.peak = 0.0
-        self._consumed = 0
 
         dev_index = resolve_device(self.device)
         if self.device and dev_index is None:
@@ -163,29 +161,6 @@ class MicrophoneRecorder:
             return bool(self._stream is not None and self._stream.active)
         except Exception:
             return True
-
-    def pending_audio(self) -> np.ndarray:
-        """Новые сэмплы с момента последнего вызова (float32 @ recorded rate).
-
-        Используется live-режимом: финальный stop() по-прежнему возвращает
-        весь фрагмент целиком — здесь только «хвост» для стриминговой
-        сессии, поэтому внутренний буфер не очищается.
-        """
-        with self._lock:
-            total = sum(len(f) for f in self._frames)
-            new = max(0, total - self._consumed)
-            if new == 0:
-                return np.zeros(0, dtype=np.float32)
-            self._consumed = total
-            tail: list[np.ndarray] = []
-            remaining = new
-            for f in reversed(self._frames):
-                take = min(len(f), remaining)
-                tail.append(f[-take:])
-                remaining -= take
-                if remaining <= 0:
-                    break
-        return np.concatenate(list(reversed(tail))).astype(np.float32)
 
     def stop(self) -> tuple[np.ndarray, int]:
         if self._stream is None:

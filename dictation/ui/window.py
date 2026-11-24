@@ -218,16 +218,10 @@ class DictationWindow:
         kind, payload = event[0], event[1] if len(event) > 1 else None
         if kind == "state":
             self._apply_state(payload)
-            if payload == "recording":
-                # live-режим: начинаем с чистого поля (сюда же упадёт partial)
-                self.result_var.set("")
         elif kind == "status":
             self.status_var.set(payload)
             if self.controller.tray is not None:
                 self.controller.tray.set_title(payload)
-        elif kind == "partial":
-            # живой текст во время записи (стриминговые движки)
-            self.result_var.set(payload or "")
         elif kind == "result":
             text = payload or ""
             tail = "…" if len(text) > 120 else ""

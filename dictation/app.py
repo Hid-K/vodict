@@ -25,8 +25,6 @@
   ("state", "idle"|"recording"|"transcribing")
   ("status", текст)                    короткий текст состояния
   ("result", текст)                    распознанный текст
-  ("partial", текст)                   live-текст во время записи
-                                       (только стриминговые движки)
   ("error", текст)                     ошибка (фронтенд решает, как показать)
   ("refresh",)                         настройки изменились — обновить вид
   ("model_download_started"|"progress"|"done"|"error", модель[, процент])
@@ -105,8 +103,6 @@ class DictationController:
         # дозаменяется в фоне. Свойство state вычисляется из флагов.
         self._recording = False
         self._transcribing = False
-        self._stream_session = None   # live-сессия движка (или None)
-        self._last_partial = ""       # последний partial-текст (дедуп событий)
         self._closed = False
 
         self.hotkey = HotkeyListener(
@@ -150,82 +146,14 @@ class DictationController:
 
     def _transcribe_worker(self) -> None:
         while not self._closed:
-            job = self._transcribe_queue.get()
+            audio, rate, pending = self._transcribe_queue.get()
             try:
-                if job and job[0] == "stream":
-                    _, session, pending = job
-                    self._stream_insert(session, pending)
-                else:
-                    _, audio, rate, pending = job
-                    self._transcribe_and_insert(audio, rate, pending)
+                self._transcribe_and_insert(audio, rate, pending)
             except Exception:
                 log.exception("Сбой потока транскрибации")
             finally:
                 self._transcribing = False
                 self._post("state", self.state)
-
-    # ------------------------------------------------------------------
-    # live-режим (распознавание на лету)
-    def _pump_live(self) -> None:
-        """Подкачивает накопившееся аудио в live-сессию стримингового движка."""
-        session = self._stream_session
-        if session is None:
-            return
-        try:
-            audio = self.recorder.pending_audio()
-            if audio.size == 0:
-                return
-            partial = session.feed(audio, self.recorder.actual_rate or 16000)
-            if partial and partial != self._last_partial:
-                self._last_partial = partial
-                self._post("partial", partial)
-        except Exception:
-            log.exception("live-распознавание отключено (ошибка)")
-            self._stream_session = None
-
-    def _stream_insert(self, session, pending: dict | None) -> None:
-        """Завершение live-диктовки: финализация стрима + вставка текста."""
-        try:
-            t0 = time.perf_counter()
-            text = (session.finalize() or "").strip()
-            transcribe_seconds = time.perf_counter() - t0
-            if not text:
-                self._transcription_done("Речь не распознана")
-                self._finish_history(pending, status="empty",
-                                     transcribe_seconds=transcribe_seconds)
-                return
-
-            target = self.focus.resolve_target()
-            self.hotkey.set_paused(True)
-            try:
-                self.inserter.insert(text, target)
-            except Exception as exc:
-                self._transcription_done()
-                self._post("result", text)
-                self._post("error", f"Не удалось вставить текст: {exc}")
-                self._finish_history(pending, status="insert_error", text=text,
-                                     transcribe_seconds=transcribe_seconds,
-                                     target_title=self._target_title(target),
-                                     error=str(exc))
-                return
-            finally:
-                self.hotkey.set_paused(False)
-
-            if target is None:
-                self._transcription_done(
-                    "Целевое окно не определено — текст остался в буфере")
-            else:
-                self._transcription_done("Вставлено ✓")
-            log.info("Live: вставлено %d символов", len(text))
-            self._post("result", text)
-            self._finish_history(pending, status="ok", text=text,
-                                 transcribe_seconds=transcribe_seconds,
-                                 target_title=self._target_title(target))
-        except Exception as exc:
-            log.exception("Ошибка live-распознавания")
-            self._transcription_done()
-            self._post("error", f"Ошибка распознавания: {exc}")
-            self._finish_history(pending, status="error", error=str(exc))
 
     # ------------------------------------------------------------------
     # горячая клавиша / кнопка
@@ -264,19 +192,6 @@ class DictationController:
                 log.exception("Не удалось начать запись")
                 self._post("error", f"Не удалось начать запись: {exc}")
                 return
-
-            # live-режим: стриминговая сессия поверх уже созданного движка
-            # (на первый диктовке движка может ещё не быть — обычный батч).
-            session = None
-            engine = self.engine
-            if engine is not None:
-                try:
-                    session = engine.open_stream(
-                        self.recorder.actual_rate or 16000)
-                except Exception as exc:
-                    log.warning("live-режим недоступен: %s", exc)
-            self._stream_session = session
-
             self._recording = True
             self._record_started = time.time()
             log.info("Запись начата")
@@ -345,8 +260,6 @@ class DictationController:
                                     "что он включён, не замучен и выбран в настройках")
                 self.stop_recording()
                 return
-            # live-режим: подкачиваем аудио в стриминговую сессию движка
-            self._pump_live()
             timeout = self.config.silence_timeout
             if timeout > 0:
                 if self.recorder.level < self.config.silence_rms_threshold:
@@ -697,7 +610,6 @@ class DictationController:
         log.info("Завершение работы приложения")
         self._recording = False
         self._transcribing = False
-        self._stream_session = None
         try:
             self.hotkey.stop()
         except Exception:
