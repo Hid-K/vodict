@@ -110,8 +110,27 @@ def _installer(version: str) -> Path | None:
                 f"сборку снова. Подробно: {exc}"
             )
 
-    _run([str(iscc), f"/DMyAppVersion={version}", str(ROOT / "packaging" / "installer.iss")])
-    installer = out_dir / f"Vodict-setup-{version}.exe"
+    # Если старый установщик занят другим процессом (просмотрщик, чат,
+    # антивирус) — собираем под уникальным именем, чтобы сборка не падала.
+    target = out_dir / f"Vodict-setup-{version}.exe"
+    extra_args: list[str] = []
+    if target.exists():
+        try:
+            with open(target, "r+b"):
+                pass
+        except PermissionError as exc:
+            import time as _time
+
+            stamp = _time.strftime("%Y%m%d-%H%M%S")
+            alt = out_dir / f"Vodict-setup-{version}-{stamp}.exe"
+            print(f"ПРЕДУПРЕЖДЕНИЕ: {target} занят — собираю под новым именем: "
+                  f"{alt.name}", flush=True)
+            extra_args = [f"/F={alt.stem}", f"/O={out_dir}"]
+            target = alt
+
+    _run([str(iscc), f"/DMyAppVersion={version}", *extra_args,
+          str(ROOT / "packaging" / "installer.iss")])
+    installer = target
     if not installer.exists():
         raise SystemExit(f"ISCC не создал {installer}")
     print(f"установщик: {installer.name} "

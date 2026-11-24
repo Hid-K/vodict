@@ -204,8 +204,6 @@ class DictationController:
         with self._state_lock:
             if not self._recording:
                 return
-            session = self._stream_session
-            self._stream_session = None
             try:
                 audio, rate = self.recorder.stop()
             except Exception as exc:
@@ -234,11 +232,7 @@ class DictationController:
                 sounds.beep_end()
             pending = self._begin_history(audio, rate)
         self._post("state", self.state)
-        if session is not None:
-            # live-диктовка: текст уже распознан, в воркере — финализация
-            self._transcribe_queue.put(("stream", session, pending))
-        else:
-            self._transcribe_queue.put(("batch", audio, rate, pending))
+        self._transcribe_queue.put((audio, rate, pending))
 
     def _recording_watchdog(self) -> None:
         low_since: float | None = None
