@@ -76,7 +76,7 @@ pip install vosk
 pip install sherpa-onnx
 ```
 
-Скачайте модель отсюда: [releases sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx/releases) (файлы `sherpa-onnx-streaming-zipformer-*.tar.bz2`), распакуйте и укажите **путь к папке модели** в поле «Модель» настроек.
+Модель скачается автоматически при первом выборе движка (~65 МБ, стриминговый zipformer ru с релизов k2-fsa). Можно использовать и свою модель: скачайте `sherpa-onnx-streaming-zipformer-*.tar.bz2` со страницы [releases sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx/releases), распакуйте и укажите **путь к папке модели** в поле «Модель» настроек.
 
 Движок выбирается в «Настройки» окна или через `--engine`. Для облачного `openai-api` укажите API-ключ в настройках или переменную `OPENAI_API_KEY`.
 

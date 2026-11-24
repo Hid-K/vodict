@@ -4,15 +4,26 @@
 включая мультиязычную (арабский, английский, индонезийский, японский,
 русский, тайский, вьетнамский, китайский — 2025) и отдельные ru/en.
 
-Настройка: скачайте модель стримингового zipformer отсюда:
-  https://github.com/k2-fsa/sherpa-onnx/releases (sherpa-onnx-streaming-zipformer-*)
-и распакуйте; путь к папке модели укажите в поле «Модель» настроек.
+Модель скачается автоматически при первом выборе движка (~65 МБ,
+стриминговый zipformer ru с релизов k2-fsa). Можно указать и свою
+распакованную модель: путь к папке — в поле «Модель» настроек.
 """
 from __future__ import annotations
 
+import logging
+import shutil
+import tarfile
 from pathlib import Path
 
 import numpy as np
+
+log = logging.getLogger(__name__)
+
+MODEL_NAME = "sherpa-onnx-streaming-zipformer-ru-2023-11-01"
+MODEL_URL = (
+    "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/"
+    + MODEL_NAME + ".tar.bz2"
+)
 
 from .base import EngineUnavailable, TranscriptionEngine, TranscriptionResult
 from .registry import register_engine
@@ -34,12 +45,7 @@ class SherpaEngine(TranscriptionEngine):
 
         path = Path((model_size or "").strip())
         if not path.is_dir():
-            raise EngineUnavailable(
-                "Для sherpa-onnx укажите путь к папке модели в поле «Модель»: "
-                "скачайте стриминговый zipformer "
-                "(sherpa-onnx-streaming-zipformer-*.tar.bz2) отсюда "
-                "https://github.com/k2-fsa/sherpa-onnx/releases и распакуйте"
-            )
+            path = self._ensure_auto_model()
 
         def pick(pattern: str) -> str:
             exact = path / pattern
@@ -70,6 +76,40 @@ class SherpaEngine(TranscriptionEngine):
         )
         self.actual_device = "cpu (onnx)"
         self.actual_compute_type = "onnx"
+
+    @staticmethod
+    def _ensure_auto_model() -> Path:
+        """Скачивает и распаковывает стриминговую модель, если её нет."""
+        import requests  # noqa: PLC0415
+
+        try:
+            from platformdirs import user_data_dir  # noqa: PLC0415
+
+            base = Path(user_data_dir("vodict", appauthor=False))
+        except Exception:
+            base = Path.home() / "Vodict"
+        dest = base / "models" / MODEL_NAME
+        if (dest / "tokens.txt").exists():
+            return dest
+
+        base.mkdir(parents=True, exist_ok=True)
+        archive = base / (MODEL_NAME + ".tar.bz2")
+        log.info("Скачивание модели Sherpa: %s", MODEL_URL)
+        with requests.get(MODEL_URL, stream=True, timeout=(30, 120)) as r:
+            r.raise_for_status()
+            with open(archive, "wb") as fh:
+                for chunk in r.iter_content(chunk_size=1 << 20):
+                    fh.write(chunk)
+        log.info("Распаковка модели Sherpa в %s", dest)
+        with tarfile.open(archive, "r:bz2") as tf:
+            tf.extractall(base)
+        extracted = base / MODEL_NAME
+        if not (extracted / "tokens.txt").exists():
+            raise EngineUnavailable(
+                f"После распаковки не найден tokens.txt (папка: {extracted})"
+            )
+        archive.unlink(missing_ok=True)
+        return extracted
 
     def open_stream(self, sample_rate: int = 16000):
         return _SherpaStreamSession(self._recognizer)
