@@ -407,6 +407,7 @@ class DictationController:
     def _transcribe_and_insert(self, audio, rate, pending: dict | None) -> None:
         target = None
         transcribe_seconds = 0.0
+        result = None
         try:
             t0 = time.perf_counter()
             result = self._recognize(audio, rate)
