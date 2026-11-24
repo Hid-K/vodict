@@ -77,7 +77,10 @@ class SherpaEngine(TranscriptionEngine):
     def _decode(self, stream) -> None:
         """Декодирование потока: API sherpa-onnx 1.x и 2.x различаются."""
         if hasattr(self._recognizer, "decode_streams"):
-            self._recognizer.decode_streams([stream])
+            # один вызов decode_streams обрабатывает лишь часть фреймов —
+            # декодируем, пока во входном потоке есть данные
+            while self._recognizer.is_ready(stream):
+                self._recognizer.decode_streams([stream])
         else:
             while self._recognizer.is_ready(stream):
                 self._recognizer.decode(stream)
