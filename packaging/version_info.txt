@@ -17,12 +17,12 @@ VSVersionInfo(
       StringTable('040904B0', [
         StringStruct('CompanyName', 'Vodict'),
         StringStruct('FileDescription', 'Vodict - golosovaya diktovka na Whisper'),
-        StringStruct('FileVersion', '0.3.1'),
+        StringStruct('FileVersion', '0.3.2'),
         StringStruct('InternalName', 'Vodict'),
         StringStruct('LegalCopyright', 'MIT License. Vodict contributors'),
         StringStruct('OriginalFilename', 'Vodict.exe'),
         StringStruct('ProductName', 'Vodict'),
-        StringStruct('ProductVersion', '0.3.1'),
+        StringStruct('ProductVersion', '0.3.2'),
       ])
     ]),
     VarFileInfo([VarStruct('Translation', [1033, 1200])]),
