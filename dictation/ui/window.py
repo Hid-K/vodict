@@ -656,31 +656,38 @@ class SettingsDialog(tk.Toplevel):
         self._h_device = self._row(f, "Устройство вычислений")
         holder = self._h_device
         self.device_var = tk.StringVar()
-        ttk.Combobox(holder, textvariable=self.device_var, state="readonly",
+        self.device_cb = ttk.Combobox(holder, textvariable=self.device_var,
+                                      state="readonly",
                      values=[lbl for lbl, _ in DEVICES], width=36).pack(fill="x")
 
         self._h_compute = self._row(f, "Тип вычислений")
         holder = self._h_compute
         self.compute_var = tk.StringVar()
-        ttk.Combobox(holder, textvariable=self.compute_var, state="readonly",
+        self.compute_cb = ttk.Combobox(holder, textvariable=self.compute_var,
+                                       state="readonly",
                      values=[lbl for lbl, _ in COMPUTES], width=36).pack(fill="x")
 
         self._h_beam = self._row(f, "Beam size (точность/скорость)")
         holder = self._h_beam
         self.beam_var = tk.StringVar()
-        ttk.Combobox(holder, textvariable=self.beam_var, state="readonly",
-                     values=[lbl for lbl, _ in BEAMS], width=24).pack(side="left")
+        self.beam_cb = ttk.Combobox(holder, textvariable=self.beam_var,
+                                    state="readonly",
+                                    values=[lbl for lbl, _ in BEAMS],
+                                    width=24).pack(side="left")
 
         self._h_vad = self._row(f, "")
         holder = self._h_vad
         self.vad_var = tk.BooleanVar()
-        ttk.Checkbutton(holder, text="Отсекать тишину и шум (VAD)",
-                        variable=self.vad_var).pack(anchor="w")
+        self.vad_cb = ttk.Checkbutton(holder, text="Отсекать тишину и шум (VAD)",
+                                      variable=self.vad_var)
+        self.vad_cb.pack(anchor="w")
 
         self._h_prompt = self._row(f, "Подсказка модели\n(стиль, глоссарий)")
         holder = self._h_prompt
         self.prompt_var = tk.StringVar()
-        ttk.Entry(holder, textvariable=self.prompt_var, width=38).pack(fill="x")
+        self.prompt_entry = ttk.Entry(holder, textvariable=self.prompt_var,
+                                      width=38)
+        self.prompt_entry.pack(fill="x")
 
         self._note(f, "Модель скачивается автоматически при первом использовании "
                       "размера. «small» — разумный баланс; «large-v3» — максимум "
@@ -1000,16 +1007,25 @@ class SettingsDialog(tk.Toplevel):
     def _set_whisper_fields_enabled(self, enabled: bool) -> None:
         """Стриминговые движки не используют настройки Whisper —
         их строки скрываются целиком."""
-        holders = (self._h_model, self._h_del, self._h_device, self._h_compute,
-                   self._h_beam, self._h_vad, self._h_prompt)
+        holders = (getattr(self, "_h_model", None), getattr(self, "_h_del", None),
+                   getattr(self, "_h_device", None), getattr(self, "_h_compute", None),
+                   getattr(self, "_h_beam", None), getattr(self, "_h_vad", None),
+                   getattr(self, "_h_prompt", None))
         for h in holders:
+            if h is None:
+                continue  # виджеты ещё не построены — финальное состояние
+                          # выставит вызов из _load
             if enabled:
                 h.grid()
             else:
                 h.grid_remove()
         state = "normal" if enabled else "disabled"
-        for w in (self.model_cb, self.del_cb, self.device_cb, self.compute_cb,
-                  self.beam_cb, self.vad_cb, self.prompt_entry):
+        for w in (getattr(self, "model_cb", None), getattr(self, "del_cb", None),
+                  getattr(self, "device_cb", None), getattr(self, "compute_cb", None),
+                  getattr(self, "beam_cb", None), getattr(self, "vad_cb", None),
+                  getattr(self, "prompt_entry", None)):
+            if w is None:
+                continue
             if isinstance(w, ttk.Combobox) and enabled:
                 w.configure(state="readonly")
             else:
