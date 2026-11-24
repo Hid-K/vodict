@@ -112,7 +112,8 @@ def _installer(version: str, commit: str) -> Path | None:
     # и даём понятное сообщение.
     target = out_dir / f"Vodict-setup-{version}-{commit}.exe"
 
-    _run([str(iscc), f"/DMyAppVersion={version}", str(ROOT / "packaging" / "installer.iss")])
+    _run([str(iscc), f"/DMyAppVersion={version}", f"/F={target.stem}",
+          str(ROOT / "packaging" / "installer.iss")])
     installer = target
     if not installer.exists():
         raise SystemExit(f"ISCC не создал {installer}")
