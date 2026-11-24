@@ -36,10 +36,6 @@ PACKAGES = [
     "tqdm",
     "windows_toasts",
     "winrt",
-    "vosk",
-    "sherpa_onnx",
-    "tone",
-    "pyctcdecode",
 ]
 
 datas = []

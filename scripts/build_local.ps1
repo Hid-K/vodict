@@ -24,19 +24,6 @@ if (Test-Path $oldInst) {
         Remove-Item -Force -ErrorAction SilentlyContinue
 }
 
-# Устанавливаем зависимости движков в venv (не критично при неудаче
-# отдельного пакета — соответствующий движок просто не попадёт в сборку)
-Write-Host 'Проверяю/ставлю зависимости движков (vosk, sherpa-onnx, tone)...'
-foreach ($pkg in @('vosk>=0.3.45', 'sherpa-onnx>=1.10.30', 'pyctcdecode>=0.2.0',
-                   'git+https://github.com/voicekit-team/T-one')) {
-    cmd /c "`"$py`" -m pip install $pkg --quiet >nul 2>&1"
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "  ПРЕДУПРЕЖДЕНИЕ: не удалось установить $pkg — движок будет недоступен в этой сборке"
-    }
-}
-
-$flags = @('--zip', '--selftest')
-
 $flags = @('--zip', '--selftest')
 if (-not $SkipInstaller) { $flags += '--installer' }
 & $py (Join-Path $root 'scripts\build_app.py') @flags

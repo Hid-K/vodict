@@ -165,6 +165,11 @@ def main() -> int:
     print(f"Версия: {args.version} | коммит: {commit} | "
           f"платформа: {platform.system()}", flush=True)
 
+    # Очистка остатков сорванных установок pip (создаются в корне проекта,
+    # если pip не смог писать в системный %TEMP%)
+    for junk in ROOT.glob("pip-*"):
+        shutil.rmtree(junk, ignore_errors=True)
+
     # Предупреждение о недостающих пакетах движков (не попадут в бандл)
     import importlib.util  # noqa: PLC0415
 
