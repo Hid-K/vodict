@@ -679,6 +679,14 @@ class SettingsDialog(tk.Toplevel):
                       "качества (медленнее). Выберите ещё не загруженную модель — "
                       "начнётся загрузка с прогрессом.")
 
+        if self.controller.config.engine not in ("faster-whisper",
+                                                 "openai-whisper"):
+            self._note(f, f"Выбран движок «{self.controller.config.engine}» — "
+                          f"стриминговый: он распознаёт речь на лету, без моделей "
+                          f"Whisper. Поля «Модель Whisper», «Устройство», «Тип "
+                          f"вычислений», Beam и VAD к нему не применяются и станут "
+                          f"активными при переключении на Whisper-движок.")
+
     # ------------------------------------------------------------------
     # статусы моделей faster-whisper: кэш / загрузка с прогрессом
     def _downloads_active(self):
