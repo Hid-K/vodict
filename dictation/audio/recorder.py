@@ -278,7 +278,9 @@ class MicrophoneRecorder:
 
     def stop(self) -> tuple[np.ndarray, int]:
         if self._impl is not None:
-            return self._impl.stop()
+            impl, self._impl = self._impl, None
+            self.started_at = None
+            return impl.stop()
         if self._stream is None:
             raise RuntimeError("Запись не запущена")
         stream, self._stream = self._stream, None
