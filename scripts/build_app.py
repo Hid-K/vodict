@@ -57,6 +57,19 @@ def _find_iscc() -> Path | None:
     return Path(which) if which else None
 
 
+def _git_short_hash() -> str:
+    """Короткий хеш коммита — уникальный суффикс имён артефактов."""
+    try:
+        out = subprocess.run(["git", "rev-parse", "--short", "HEAD"],
+                             cwd=str(ROOT), capture_output=True,
+                             text=True, timeout=15)
+        if out.returncode == 0 and out.stdout.strip():
+            return out.stdout.strip()
+    except Exception:
+        pass
+    return "nogit"
+
+
 def _selftest() -> None:
     """Smoke: exe импортирует весь UI-стек и видит микрофоны."""
     exe = DIST / "Vodict" / "Vodict.exe"
@@ -68,9 +81,9 @@ def _selftest() -> None:
         raise SystemExit("smoke --selftest провален — см. logs/crash.log")
 
 
-def _portable_zip(version: str) -> Path:
+def _portable_zip(version: str, commit: str) -> Path:
     src = DIST / "Vodict"
-    zip_path = ROOT / f"Vodict-windows-{version}.zip"
+    zip_path = ROOT / f"Vodict-windows-{version}-{commit}.zip"
     if zip_path.exists():
         zip_path.unlink()
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -82,7 +95,7 @@ def _portable_zip(version: str) -> Path:
     return zip_path
 
 
-def _installer(version: str) -> Path | None:
+def _installer(version: str, commit: str) -> Path | None:
     if not IS_WIN:
         print("установщик: пропущен (не Windows)")
         return None
@@ -97,21 +110,9 @@ def _installer(version: str) -> Path | None:
     # Если старый установщик занят другим процессом (просмотрщик, Блокнот,
     # антивирус) — ISCC отчитается невнятным «in use». Проверяем заранее
     # и даём понятное сообщение.
-    target = out_dir / f"Vodict-setup-{version}.exe"
-    if target.exists():
-        try:
-            with open(target, "r+b"):
-                pass
-        except PermissionError as exc:
-            raise SystemExit(
-                f"Не могу перезаписать {target}: файл занят другим процессом. "
-                f"Закройте программу, которая его держит (просмотрщик, "
-                f"Блокнот, антивирус), удалите файл вручную и запустите "
-                f"сборку снова. Подробно: {exc}"
-            )
+    target = out_dir / f"Vodict-setup-{version}-{commit}.exe"
 
-    _run([str(iscc), f"/DMyAppVersion={version}", *extra_args,
-          str(ROOT / "packaging" / "installer.iss")])
+    _run([str(iscc), f"/DMyAppVersion={version}", str(ROOT / "packaging" / "installer.iss")])
     installer = target
     if not installer.exists():
         raise SystemExit(f"ISCC не создал {installer}")
@@ -157,7 +158,9 @@ def main() -> int:
         from dictation import __version__ as args_version  # noqa: PLC0415
         args.version = args_version
 
-    print(f"Версия: {args.version} | платформа: {platform.system()}", flush=True)
+    commit = _git_short_hash()
+    print(f"Версия: {args.version} | коммит: {commit} | "
+          f"платформа: {platform.system()}", flush=True)
 
     # Очистка остатков сорванных установок pip (создаются в корне проекта,
     # если pip не смог писать в системный %TEMP%)
@@ -196,10 +199,10 @@ def main() -> int:
     if args.selftest:
         _selftest()
     if args.zip and IS_WIN:
-        zip_path = _portable_zip(args.version)
+        zip_path = _portable_zip(args.version, commit)
         _fix_integrity(zip_path)
     if args.installer:
-        installer = _installer(args.version)
+        installer = _installer(args.version, commit)
         if installer is not None:
             _fix_integrity(installer)
 
