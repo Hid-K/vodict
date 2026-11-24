@@ -8,6 +8,8 @@ https://alphacephei.com/vosk/models (ru, en-us, de, es, fr, ...).
 """
 from __future__ import annotations
 
+import json
+
 import logging
 import zipfile
 from pathlib import Path
@@ -64,8 +66,9 @@ class VoskEngine(TranscriptionEngine):
             return dest
 
         log.info("Скачивание модели Vosk: %s", cls.MODEL_URL)
-        base.mkdir(parents=True, exist_ok=True)
-        archive = base / (cls.MODEL_NAME + ".zip")
+        models_dir = base / "models"
+        models_dir.mkdir(parents=True, exist_ok=True)
+        archive = models_dir / (cls.MODEL_NAME + ".zip")
         with requests.get(cls.MODEL_URL, stream=True, timeout=(30, 120)) as r:
             r.raise_for_status()
             total = int(r.headers.get("content-length") or 0)
@@ -78,7 +81,7 @@ class VoskEngine(TranscriptionEngine):
                         progress_cb(min(99, done * 100 // total), "vosk-model")
         log.info("Распаковка модели Vosk в %s", dest)
         with zipfile.ZipFile(archive) as zf:
-            zf.extractall(base)
+            zf.extractall(models_dir)
         archive.unlink(missing_ok=True)
         if not dest.is_dir():
             raise EngineUnavailable(
