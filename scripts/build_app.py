@@ -114,6 +114,23 @@ def _installer(version: str, commit: str) -> Path | None:
     full_version = f"{version}-{commit}"
     target = out_dir / f"Vodict-setup-{full_version}.exe"
 
+    # Если целевой файл занят другим процессом (просмотрщик, чат,
+    # антивирус) — переносим вывод в свежий подкаталог.
+    if target.exists():
+        try:
+            with open(target, "r+b"):
+                pass
+            target.unlink()
+        except OSError as exc:
+            import time as _time
+
+            fresh = out_dir / f"build-{_time.strftime('%Y%m%d-%H%M%S')}"
+            fresh.mkdir(parents=True, exist_ok=True)
+            print(f"ПРЕДУПРЕЖДЕНИЕ: {target.name} занят — вывод в {fresh.name}",
+                  flush=True)
+            target = fresh / target.name
+            out_dir = fresh
+
     _run([str(iscc), f"/DMyAppVersion={full_version}",
           str(ROOT / "packaging" / "installer.iss")])
     installer = target

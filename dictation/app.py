@@ -317,7 +317,7 @@ class DictationController:
                 sounds.beep_end()
             pending = self._begin_history(audio, rate)
         self._post("state", self.state)
-        self._transcribe_queue.put((audio, rate, pending))
+        self._transcribe_queue.put(("batch", audio, rate, pending))
 
     def _recording_watchdog(self) -> None:
         low_since: float | None = None
