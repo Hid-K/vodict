@@ -31,6 +31,7 @@ PACKAGES = [
     "pynput",
     "pystray",
     "pyperclip",
+    "soundcard",
     "platformdirs",
     "huggingface_hub",
     "tqdm",
