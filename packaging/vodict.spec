@@ -32,6 +32,7 @@ PACKAGES = [
     "pystray",
     "pyperclip",
     "soundcard",
+    "socks",
     "platformdirs",
     "huggingface_hub",
     "tqdm",

@@ -23,6 +23,28 @@ from .base import EngineUnavailable, TranscriptionEngine, TranscriptionResult
 from .registry import register_engine
 
 
+def _log_tqdm_class():
+    """tqdm, который раз в 2 сек пишет прогресс загрузки в лог."""
+    try:
+        from tqdm import tqdm  # noqa: PLC0415
+    except Exception:
+        return None
+
+    class _LogTqdm(tqdm):
+        _last_log = 0.0
+
+        def display(self, msg=None, pos=None):
+            import time  # noqa: PLC0415
+
+            now = time.monotonic()
+            if now - type(self)._last_log >= 2.0:
+                type(self)._last_log = now
+                log.info("Модель Sherpa: %s", self.format_msg(msg))
+            super().display(msg, pos)
+
+    return _LogTqdm
+
+
 @register_engine
 class SherpaEngine(TranscriptionEngine):
     name = "sherpa"
@@ -103,7 +125,8 @@ class SherpaEngine(TranscriptionEngine):
             return dest
 
         log.info("Скачивание модели Sherpa: %s (huggingface_hub)", MODEL_REPO)
-        snapshot_download(repo_id=MODEL_REPO, local_dir=dest)
+        snapshot_download(repo_id=MODEL_REPO, local_dir=dest,
+                          tqdm_class=_log_tqdm_class())
         if not (dest / "tokens.txt").exists():
             raise EngineUnavailable(
                 f"После загрузки не найден tokens.txt (папка: {dest})"
