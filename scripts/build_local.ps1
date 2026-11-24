@@ -16,6 +16,14 @@ if (-not (Test-Path $py)) { $py = 'python' }
 
 # conda PATH-фикс теперь внутри build_app.py — единая точка.
 
+# Удаляем старые установщики: если файл занят (открыт в просмотрщике/
+# удерживается интерфейсом) — ISCC упадёт с «in use» на перезаписи.
+$oldInst = Join-Path $root 'dist\installer'
+if (Test-Path $oldInst) {
+    Get-ChildItem $oldInst -Filter 'Vodict-setup-*.exe' -ErrorAction SilentlyContinue |
+        Remove-Item -Force -ErrorAction SilentlyContinue
+}
+
 $flags = @('--zip', '--selftest')
 if (-not $SkipInstaller) { $flags += '--installer' }
 & $py (Join-Path $root 'scripts\build_app.py') @flags
