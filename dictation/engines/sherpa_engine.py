@@ -20,6 +20,7 @@ log = logging.getLogger(__name__)
 MODEL_REPO = "csukuangfj/sherpa-onnx-streaming-zipformer-small-ru-vosk-int8-2025-08-16"
 
 from .base import EngineUnavailable, TranscriptionEngine, TranscriptionResult
+from ..audio.recorder import ensure_rate
 from .registry import register_engine
 
 
@@ -176,11 +177,15 @@ class _SherpaStreamSession:
 
     PAD = 24000  # 1.5 с тишины: sherpa падает на аудио короче ~1 с
 
+    MIN_CHUNK = 16000  # 1 с: декодировать только накопив секунду —
+    # короткие куски роняют C++-декодер sherpa (не хватает фреймов)
+
     def __init__(self, engine, recognizer) -> None:
         self._engine = engine
         self._rec = recognizer
         self._stream = recognizer.create_stream()
         self._left_padded = False
+        self._pending = np.zeros(0, dtype=np.float32)
 
     def _decode_stream(self, stream) -> None:
         self._engine._decode(stream)
@@ -195,11 +200,19 @@ class _SherpaStreamSession:
         if not self._left_padded:
             audio = np.pad(audio, (self.PAD, 0))
             self._left_padded = True
-        self._stream.accept_waveform(sample_rate, audio)
-        self._decode_stream(self._stream)
+        self._pending = np.concatenate(
+            [self._pending, ensure_rate(audio, sample_rate, 16000)])
+        while self._pending.size >= self.MIN_CHUNK:
+            piece = self._pending[:self.MIN_CHUNK]
+            self._pending = self._pending[self.MIN_CHUNK:]
+            self._stream.accept_waveform(16000, piece)
+            self._decode_stream(self._stream)
         return self._result_text(self._rec, self._stream).strip()
 
     def finalize(self) -> str:
+        if self._pending.size:
+            self._stream.accept_waveform(16000, self._pending)
+            self._pending = np.zeros(0, dtype=np.float32)
         self._stream.accept_waveform(16000, np.zeros(self.PAD, dtype=np.float32))
         self._stream.input_finished()
         self._decode_stream(self._stream)
