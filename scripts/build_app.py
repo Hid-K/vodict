@@ -185,7 +185,7 @@ def main() -> int:
     # Предупреждение о недостающих пакетах движков (не попадут в бандл)
     import importlib.util  # noqa: PLC0415
 
-    missing = [m for m in ("vosk", "sherpa_onnx", "tone", "pyctcdecode")
+    missing = [m for m in ("vosk", "sherpa_onnx")
                if importlib.util.find_spec(m) is None]
     if missing:
         print(f"ПРЕДУПРЕЖДЕНИЕ: в окружении сборки нет пакетов движков: "

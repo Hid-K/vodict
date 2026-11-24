@@ -193,7 +193,7 @@ class HotkeyTests(unittest.TestCase):
 
         names = set(available_engines())
         self.assertLessEqual(
-            {"faster-whisper", "openai-whisper", "openai-api", "tone",
+            {"faster-whisper", "openai-whisper", "openai-api",
              "vosk", "sherpa"}, names)
 
 

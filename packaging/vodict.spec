@@ -20,7 +20,7 @@ ROOT = os.path.abspath(os.path.join(SPECPATH, ".."))
 #   sounddevice + _sounddevice_data (portaudio DLL)
 # - pynput/pystray (динамический выбор бэкендов), windows_toasts + winrt
 #   (нативные WinRT-модули), huggingface_hub, tqdm
-# - движки T-one/Vosk/Sherpa: если их пакеты установлены в окружении
+# - движки Vosk/Sherpa: если их пакеты установлены в окружении
 #   сборки — попадают в бандл; если нет — движки просто недоступны
 #   (см. requirements-engines.txt и предупреждения build_app.py)
 PACKAGES = [
@@ -38,8 +38,6 @@ PACKAGES = [
     "winrt",
     "vosk",
     "sherpa_onnx",
-    "tone",
-    "pyctcdecode",
 ]
 
 datas = []
