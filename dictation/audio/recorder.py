@@ -183,8 +183,12 @@ class MicrophoneRecorder:
             raise RuntimeError("Запись уже идёт")
 
         dev_index = resolve_device(self.device)
-        if self.device and dev_index is None:
-            # Не найден в PortAudio — пробуем soundcard (WASAPI напрямую).
+        dev_name = str(self.device or "").strip().casefold()
+        # «Remote Audio» (перенаправленный микрофон RDP) роняет PortAudio
+        # при открытии — сразу идём через soundcard (WASAPI напрямую).
+        force_soundcard = "remote audio" in dev_name
+        if self.device and (dev_index is None or force_soundcard):
+            # Не найден в PortAudio (или RDP-устройство) — soundcard.
             impl = _SoundcardRecorder.try_create(self.requested_rate, self.device)
             if impl is None:
                 # Выбранный ранее микрофон отключён или переименован —
@@ -323,6 +327,7 @@ class _SoundcardRecorder:
         self.actual_rate = sample_rate
         self._stop_evt = threading.Event()
         self._thread: threading.Thread | None = None
+        self._mic = None  # объект микрофона soundcard (заполняется в try_create)
 
     @classmethod
     def try_create(cls, sample_rate: int, device_name: str) -> "_SoundcardRecorder | None":
@@ -333,7 +338,9 @@ class _SoundcardRecorder:
             needle = str(device_name).casefold()
             for m in sc.all_microphones():
                 if needle in str(m.name).casefold() and int(m.channels) >= 1:
-                    return cls(sample_rate, str(m.name))
+                    rec = cls(sample_rate, str(m.name))
+                    rec._mic = m   # найденный объект — без повторного поиска
+                    return rec
         except Exception:
             pass
         return None
@@ -353,10 +360,22 @@ class _SoundcardRecorder:
         self.started_at = time.monotonic()
 
     def _loop(self) -> None:
+        # WASAPI требует инициализации COM в каждом потоке —
+        # используем cffi-биндинг самого soundcard.
+        import soundcard.mediafoundation as _mf  # noqa: PLC0415
+
+        hr = _mf._ole32.CoInitializeEx(_mf._ffi.NULL, 0x0)  # MTA
+        com_initialized = hr in (0, 1)  # S_OK / S_FALSE
         import soundcard as sc  # noqa: PLC0415
 
-        mic = sc.get_microphone(id=self.device_name.casefold(),
-                                include_loopback=False)
+        mic = getattr(self, "_mic", None)
+        if mic is None:
+            for m in sc.all_microphones():
+                if self.device_name.casefold() in str(m.name).casefold():
+                    mic = m
+                    break
+        if mic is None:
+            raise RuntimeError(f"Микрофон {self.device_name!r} не найден")
         rate = self.requested_rate
         try:
             rec_ctx = mic.recorder(samplerate=rate, channels=1)
@@ -377,6 +396,11 @@ class _SoundcardRecorder:
                         self.peak = self.level
                 except Exception:
                     self.level = 0.0
+        if com_initialized:
+            try:
+                _mf._ole32.CoUninitialize()
+            except Exception:
+                pass
 
     def elapsed(self) -> float:
         if self.started_at is None:
