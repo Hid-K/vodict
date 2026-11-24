@@ -94,23 +94,21 @@ def _installer(version: str) -> Path | None:
     out_dir = DIST / "installer"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # Если старый установщик занят другим процессом (просмотрщик, чат,
-    # антивирус) — собираем под уникальным именем, чтобы сборка не падала.
+    # Если старый установщик занят другим процессом (просмотрщик, Блокнот,
+    # антивирус) — ISCC отчитается невнятным «in use». Проверяем заранее
+    # и даём понятное сообщение.
     target = out_dir / f"Vodict-setup-{version}.exe"
-    extra_args: list[str] = []
     if target.exists():
         try:
             with open(target, "r+b"):
                 pass
         except PermissionError as exc:
-            import time as _time
-
-            stamp = _time.strftime("%Y%m%d-%H%M%S")
-            alt = out_dir / f"Vodict-setup-{version}-{stamp}.exe"
-            print(f"ПРЕДУПРЕЖДЕНИЕ: {target} занят — собираю под новым именем: "
-                  f"{alt.name}", flush=True)
-            extra_args = [f"/F={alt.stem}", f"/O={out_dir}"]
-            target = alt
+            raise SystemExit(
+                f"Не могу перезаписать {target}: файл занят другим процессом. "
+                f"Закройте программу, которая его держит (просмотрщик, "
+                f"Блокнот, антивирус), удалите файл вручную и запустите "
+                f"сборку снова. Подробно: {exc}"
+            )
 
     _run([str(iscc), f"/DMyAppVersion={version}", *extra_args,
           str(ROOT / "packaging" / "installer.iss")])
