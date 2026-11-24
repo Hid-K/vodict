@@ -21,6 +21,13 @@ if (-not $SkipInstaller) { $flags += '--installer' }
 & $py (Join-Path $root 'scripts\build_app.py') @flags
 if ($LASTEXITCODE -ne 0) { throw "build_app.py завершился с ошибкой (exit $LASTEXITCODE)" }
 
+# Сброс Low-метки целостности у установщика: иначе он запускается с
+# урезанным токеном и не может писать в %TEMP% («Ошибка 5»).
+$setupExe = Join-Path $root 'dist\installer\Vodict-setup-0.3.1.exe'
+if (Test-Path $setupExe) {
+    icacls $setupExe /setintegritylevel M | Out-Null
+}
+
 if ($Run) {
     Write-Host 'Smoke уже выполнен внутри build_app.py (--selftest).'
 }
