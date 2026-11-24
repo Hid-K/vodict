@@ -11,19 +11,13 @@
 from __future__ import annotations
 
 import logging
-import shutil
-import tarfile
 from pathlib import Path
 
 import numpy as np
 
 log = logging.getLogger(__name__)
 
-MODEL_NAME = "sherpa-onnx-streaming-zipformer-ru-2023-11-01"
-MODEL_URL = (
-    "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/"
-    + MODEL_NAME + ".tar.bz2"
-)
+MODEL_REPO = "csukuangfj/sherpa-onnx-streaming-zipformer-small-ru-vosk-int8-2025-08-16"
 
 from .base import EngineUnavailable, TranscriptionEngine, TranscriptionResult
 from .registry import register_engine
@@ -44,7 +38,8 @@ class SherpaEngine(TranscriptionEngine):
             ) from exc
 
         path = Path((model_size or "").strip())
-        if not path.is_dir():
+        if not ((model_size or "").strip() and path.is_dir()
+                and (path / "tokens.txt").exists()):
             path = self._ensure_auto_model()
 
         def pick(pattern: str) -> str:
@@ -77,10 +72,25 @@ class SherpaEngine(TranscriptionEngine):
         self.actual_device = "cpu (onnx)"
         self.actual_compute_type = "onnx"
 
+    def _decode(self, stream) -> None:
+        """Декодирование потока: API sherpa-onnx 1.x и 2.x различаются."""
+        if hasattr(self._recognizer, "decode_streams"):
+            self._recognizer.decode_streams([stream])
+        else:
+            while self._recognizer.is_ready(stream):
+                self._recognizer.decode(stream)
+
+    @staticmethod
+    def _result_text(recognizer, stream) -> str:
+        r = getattr(stream, "result", None)
+        if r is not None and hasattr(r, "text"):
+            return r.text
+        return recognizer.get_result(stream)
+
     @staticmethod
     def _ensure_auto_model() -> Path:
         """Скачивает и распаковывает стриминговую модель, если её нет."""
-        import requests  # noqa: PLC0415
+        from huggingface_hub import snapshot_download  # noqa: PLC0415
 
         try:
             from platformdirs import user_data_dir  # noqa: PLC0415
@@ -88,39 +98,27 @@ class SherpaEngine(TranscriptionEngine):
             base = Path(user_data_dir("vodict", appauthor=False))
         except Exception:
             base = Path.home() / "Vodict"
-        dest = base / "models" / MODEL_NAME
+        dest = base / "models" / MODEL_REPO
         if (dest / "tokens.txt").exists():
             return dest
 
-        base.mkdir(parents=True, exist_ok=True)
-        archive = base / (MODEL_NAME + ".tar.bz2")
-        log.info("Скачивание модели Sherpa: %s", MODEL_URL)
-        with requests.get(MODEL_URL, stream=True, timeout=(30, 120)) as r:
-            r.raise_for_status()
-            with open(archive, "wb") as fh:
-                for chunk in r.iter_content(chunk_size=1 << 20):
-                    fh.write(chunk)
-        log.info("Распаковка модели Sherpa в %s", dest)
-        with tarfile.open(archive, "r:bz2") as tf:
-            tf.extractall(base)
-        extracted = base / MODEL_NAME
-        if not (extracted / "tokens.txt").exists():
+        log.info("Скачивание модели Sherpa: %s (huggingface_hub)", MODEL_REPO)
+        snapshot_download(repo_id=MODEL_REPO, local_dir=dest)
+        if not (dest / "tokens.txt").exists():
             raise EngineUnavailable(
-                f"После распаковки не найден tokens.txt (папка: {extracted})"
+                f"После загрузки не найден tokens.txt (папка: {dest})"
             )
-        archive.unlink(missing_ok=True)
-        return extracted
+        return dest
 
     def open_stream(self, sample_rate: int = 16000):
-        return _SherpaStreamSession(self._recognizer)
+        return _SherpaStreamSession(self, self._recognizer)
 
     def transcribe(self, audio: np.ndarray, sample_rate: int = 16000) -> TranscriptionResult:
         audio = np.asarray(audio, dtype=np.float32)
         stream = self._recognizer.create_stream()
         stream.accept_waveform(sample_rate, audio)
-        while self._recognizer.is_ready(stream):
-            self._recognizer.decode(stream)
-        text = self._recognizer.get_result(stream).strip()
+        self._decode(stream)
+        text = self._result_text(self._recognizer, stream).strip()
         return TranscriptionResult(
             text=text,
             audio_duration=len(audio) / float(sample_rate) if sample_rate else None,
@@ -133,23 +131,35 @@ class SherpaEngine(TranscriptionEngine):
 class _SherpaStreamSession:
     """Live-сессия Sherpa-onnx: расшифровка накопленного аудио на лету."""
 
-    def __init__(self, recognizer) -> None:
+    PAD = 24000  # 1.5 с тишины: sherpa падает на аудио короче ~1 с
+
+    def __init__(self, engine, recognizer) -> None:
+        self._engine = engine
         self._rec = recognizer
         self._stream = recognizer.create_stream()
+        self._left_padded = False
+
+    def _decode_stream(self, stream) -> None:
+        self._engine._decode(stream)
+
+    def _result_text(self, recognizer, stream) -> str:
+        return self._engine._result_text(recognizer, stream)
 
     def feed(self, audio: np.ndarray, sample_rate: int = 16000) -> str:
         audio = np.asarray(audio, dtype=np.float32)
         if audio.size == 0:
             return ""
+        if not self._left_padded:
+            audio = np.pad(audio, (self.PAD, 0))
+            self._left_padded = True
         self._stream.accept_waveform(sample_rate, audio)
-        while self._rec.is_ready(self._stream):
-            self._rec.decode(self._stream)
-        return self._rec.get_result(self._stream).strip()
+        self._decode_stream(self._stream)
+        return self._result_text(self._rec, self._stream).strip()
 
     def finalize(self) -> str:
+        self._stream.accept_waveform(16000, np.zeros(self.PAD, dtype=np.float32))
         self._stream.input_finished()
-        while self._rec.is_ready(self._stream):
-            self._rec.decode(self._stream)
-        text = self._rec.get_result(self._stream).strip()
+        self._decode_stream(self._stream)
+        text = self._result_text(self._rec, self._stream).strip()
         self._stream = self._rec.create_stream()
         return text
