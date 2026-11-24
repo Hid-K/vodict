@@ -110,9 +110,11 @@ def _installer(version: str, commit: str) -> Path | None:
     # Если старый установщик занят другим процессом (просмотрщик, Блокнот,
     # антивирус) — ISCC отчитается невнятным «in use». Проверяем заранее
     # и даём понятное сообщение.
-    target = out_dir / f"Vodict-setup-{version}-{commit}.exe"
+    # Версия с хешем коммита: имя установщика уникально для каждого билда
+    full_version = f"{version}-{commit}"
+    target = out_dir / f"Vodict-setup-{full_version}.exe"
 
-    _run([str(iscc), f"/DMyAppVersion={version}", f"/F={target.stem}",
+    _run([str(iscc), f"/DMyAppVersion={full_version}",
           str(ROOT / "packaging" / "installer.iss")])
     installer = target
     if not installer.exists():
