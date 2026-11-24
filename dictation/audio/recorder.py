@@ -53,6 +53,7 @@ def list_input_devices(dedupe: bool = True, devices=None) -> list[dict]:
         rows.append({
             "index": idx,
             "name": name,
+            "channels": int(dev.get("max_input_channels", 0)),
             "default_samplerate": int(float(dev.get("default_samplerate", 0))),
             "is_default": idx == default_index,
             "hostapi": _hostapi_name(dev.get("hostapi")),
@@ -111,10 +112,17 @@ def resolve_device(device, devices=None) -> int | None:
         return int(text)
     needle = text.casefold()
     rows = devices if devices is not None else list_input_devices(dedupe=False)
+    fallback = None
     for r in rows:
-        if needle in r["name"].casefold():
+        if needle not in r["name"].casefold():
+            continue
+        # одно имя может быть и у выхода, и у входа (напр. «Remote Audio»):
+        # для записи нужен экземпляр с входными каналами
+        if int(r.get("channels", 0)) > 0:
             return r["index"]
-    return None
+        if fallback is None:
+            fallback = r["index"]
+    return fallback
 
 
 class MicrophoneRecorder:
