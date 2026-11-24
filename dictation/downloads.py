@@ -96,9 +96,18 @@ class _Tracker:
 
 
 def _make_hook(tracker: _Tracker):
+    import os  # noqa: PLC0415
+
+    _DEVNULL = open(os.devnull, "w", encoding="utf-8")
     from tqdm import tqdm
 
     class _Hook(tqdm):
+        def __init__(self, *args, **kwargs):
+            # в windowed-приложении sys.stderr равен None — tqdm падает
+            # с 'NoneType' object has no attribute 'write'; вывод в никуда
+            kwargs.setdefault("file", _DEVNULL)
+            super().__init__(*args, **kwargs)
+
         def update(self, n: int = 1) -> None:
             super().update(n)
             tracker.on_update(self)
