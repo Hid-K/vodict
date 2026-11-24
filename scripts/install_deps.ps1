@@ -4,7 +4,7 @@
 # Если PyPI качается медленно — зеркало (быстро из РФ):
 #   scripts\install_deps.bat -IndexUrl https://mirrors.aliyun.com/pypi/simple/
 # Если нужен прокси:
-#   scripts\install_deps.bat -Proxy socks5://127.0.0.1:10808
+#   scripts\install_deps.bat -Proxy socks5://127.0.0.1:1080
 param(
     [string]$Proxy = "",
     [string]$IndexUrl = ""

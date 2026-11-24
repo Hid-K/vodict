@@ -27,3 +27,5 @@ pip-unpack-*/
 .pipcache/
 
 .venv-py314-backup/
+
+*.log
