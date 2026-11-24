@@ -608,8 +608,10 @@ class SettingsDialog(tk.Toplevel):
         self.engine_var = tk.StringVar()
         ttk.Combobox(holder, textvariable=self.engine_var, state="readonly",
                      values=list(self._engine_by_label), width=36).pack(fill="x")
+        self.engine_var.trace_add("write", lambda *_: self._on_engine_changed())
 
-        holder = self._row(f, "Модель Whisper")
+        self._h_model = self._row(f, "Модель Whisper")
+        holder = self._h_model
         self.model_var = tk.StringVar()
         self.model_cb = ttk.Combobox(holder, textvariable=self.model_var,
                                      values=self._model_labels(), width=36)
@@ -624,7 +626,8 @@ class SettingsDialog(tk.Toplevel):
         self.dl_bar.pack(fill="x", pady=(2, 0))
 
         # Удаление скачанных моделей (освобождение места)
-        holder = self._row(f, "Удаление моделей")
+        self._h_del = self._row(f, "Удаление моделей")
+        holder = self._h_del
         self.del_model_var = tk.StringVar()
         self.del_cb = ttk.Combobox(holder, textvariable=self.del_model_var,
                                    state="readonly", width=32)
@@ -650,27 +653,32 @@ class SettingsDialog(tk.Toplevel):
         ttk.Combobox(holder, textvariable=self.lang_var, state="readonly",
                      values=[lbl for lbl, _ in LANGS], width=36).pack(fill="x")
 
-        holder = self._row(f, "Устройство вычислений")
+        self._h_device = self._row(f, "Устройство вычислений")
+        holder = self._h_device
         self.device_var = tk.StringVar()
         ttk.Combobox(holder, textvariable=self.device_var, state="readonly",
                      values=[lbl for lbl, _ in DEVICES], width=36).pack(fill="x")
 
-        holder = self._row(f, "Тип вычислений")
+        self._h_compute = self._row(f, "Тип вычислений")
+        holder = self._h_compute
         self.compute_var = tk.StringVar()
         ttk.Combobox(holder, textvariable=self.compute_var, state="readonly",
                      values=[lbl for lbl, _ in COMPUTES], width=36).pack(fill="x")
 
-        holder = self._row(f, "Beam size (точность/скорость)")
+        self._h_beam = self._row(f, "Beam size (точность/скорость)")
+        holder = self._h_beam
         self.beam_var = tk.StringVar()
         ttk.Combobox(holder, textvariable=self.beam_var, state="readonly",
                      values=[lbl for lbl, _ in BEAMS], width=24).pack(side="left")
 
-        holder = self._row(f, "")
+        self._h_vad = self._row(f, "")
+        holder = self._h_vad
         self.vad_var = tk.BooleanVar()
         ttk.Checkbutton(holder, text="Отсекать тишину и шум (VAD)",
                         variable=self.vad_var).pack(anchor="w")
 
-        holder = self._row(f, "Подсказка модели\n(стиль, глоссарий)")
+        self._h_prompt = self._row(f, "Подсказка модели\n(стиль, глоссарий)")
+        holder = self._h_prompt
         self.prompt_var = tk.StringVar()
         ttk.Entry(holder, textvariable=self.prompt_var, width=38).pack(fill="x")
 
@@ -990,7 +998,15 @@ class SettingsDialog(tk.Toplevel):
                       "Выход из программы — меню иконки трея → «Выход».")
 
     def _set_whisper_fields_enabled(self, enabled: bool) -> None:
-        """Стриминговые движки не используют настройки Whisper."""
+        """Стриминговые движки не используют настройки Whisper —
+        их строки скрываются целиком."""
+        holders = (self._h_model, self._h_del, self._h_device, self._h_compute,
+                   self._h_beam, self._h_vad, self._h_prompt)
+        for h in holders:
+            if enabled:
+                h.grid()
+            else:
+                h.grid_remove()
         state = "normal" if enabled else "disabled"
         for w in (self.model_cb, self.del_cb, self.device_cb, self.compute_cb,
                   self.beam_cb, self.vad_cb, self.prompt_entry):
@@ -998,6 +1014,11 @@ class SettingsDialog(tk.Toplevel):
                 w.configure(state="readonly")
             else:
                 w.configure(state=state)
+
+    def _on_engine_changed(self) -> None:
+        name = self._engine_by_label.get(self.engine_var.get(), "")
+        self._set_whisper_fields_enabled(
+            name in ("faster-whisper", "openai-whisper"))
 
     # ------------------------------------------------------------------
     # заполнение полей из конфига
