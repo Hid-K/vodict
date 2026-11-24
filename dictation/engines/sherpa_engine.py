@@ -23,34 +23,13 @@ from .base import EngineUnavailable, TranscriptionEngine, TranscriptionResult
 from .registry import register_engine
 
 
-def _log_tqdm_class():
-    """tqdm, который раз в 2 сек пишет прогресс загрузки в лог."""
-    try:
-        from tqdm import tqdm  # noqa: PLC0415
-    except Exception:
-        return None
-
-    class _LogTqdm(tqdm):
-        _last_log = 0.0
-
-        def display(self, msg=None, pos=None):
-            import time  # noqa: PLC0415
-
-            now = time.monotonic()
-            if now - type(self)._last_log >= 2.0:
-                type(self)._last_log = now
-                log.info("Модель Sherpa: %s", self.format_msg(msg))
-            super().display(msg, pos)
-
-    return _LogTqdm
-
 
 @register_engine
 class SherpaEngine(TranscriptionEngine):
     name = "sherpa"
     label = "Sherpa-onnx (стриминг, zipformer, CPU)"
 
-    def __init__(self, model_size: str = "", **_):
+    def __init__(self, model_size: str = "", progress_cb=None, **_):
         super().__init__()
         try:
             import sherpa_onnx  # noqa: PLC0415
@@ -62,7 +41,7 @@ class SherpaEngine(TranscriptionEngine):
         path = Path((model_size or "").strip())
         if not ((model_size or "").strip() and path.is_dir()
                 and (path / "tokens.txt").exists()):
-            path = self._ensure_auto_model()
+            path = self._ensure_auto_model(progress_cb)
 
         def pick(pattern: str) -> str:
             exact = path / pattern
@@ -110,9 +89,9 @@ class SherpaEngine(TranscriptionEngine):
         return recognizer.get_result(stream)
 
     @staticmethod
-    def _ensure_auto_model() -> Path:
+    def _ensure_auto_model(progress_cb=None) -> Path:
         """Скачивает и распаковывает стриминговую модель, если её нет."""
-        from huggingface_hub import snapshot_download  # noqa: PLC0415
+        import requests  # noqa: PLC0415
 
         try:
             from platformdirs import user_data_dir  # noqa: PLC0415
@@ -123,6 +102,47 @@ class SherpaEngine(TranscriptionEngine):
         dest = base / "models" / MODEL_REPO
         if (dest / "tokens.txt").exists():
             return dest
+
+        dest.mkdir(parents=True, exist_ok=True)
+        files = ("encoder.int8.onnx", "decoder.onnx", "joiner.int8.onnx",
+                 "tokens.txt", "bpe.model")
+        url = f"https://huggingface.co/{MODEL_REPO}/resolve/main"
+
+        if all((dest / f).exists() for f in files):
+            return dest
+
+        sizes = {}
+        for f in files:
+            try:
+                r = requests.head(f"{url}/{f}", allow_redirects=True, timeout=30)
+                sizes[f] = int(r.headers.get("content-length") or 0)
+            except Exception:
+                sizes[f] = 0
+        total = max(1, sum(sizes.values()))
+
+        done = 0
+        last_pct = -1
+        for f in files:
+            out = dest / f
+            if out.exists() and sizes.get(f) and out.stat().st_size == sizes[f]:
+                done += sizes[f]
+                continue
+            if progress_cb:
+                progress_cb(min(99, done * 100 // total), f)
+            with requests.get(f"{url}/{f}", stream=True,
+                              timeout=(30, 120)) as r:
+                r.raise_for_status()
+                with open(out, "wb") as fh:
+                    for chunk in r.iter_content(chunk_size=1 << 18):
+                        fh.write(chunk)
+                        done += len(chunk)
+                        pct = min(99, done * 100 // total)
+                        if progress_cb and pct != last_pct:
+                            last_pct = pct
+                            progress_cb(pct, f)
+        if progress_cb:
+            progress_cb(100, "готово")
+        return dest
 
         log.info("Скачивание модели Sherpa: %s (huggingface_hub)", MODEL_REPO)
         snapshot_download(repo_id=MODEL_REPO, local_dir=dest,

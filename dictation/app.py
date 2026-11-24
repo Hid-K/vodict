@@ -556,10 +556,14 @@ class DictationController:
                     self.downloads.wait_until_cached(self.config.model_size)
                 self._post("status", "Загрузка модели (первый запуск может занять пару минут)…")
                 self.engine = create_engine(
-                    self.config.engine, **self._engine_options()
+                    self.config.engine, progress_cb=self._engine_progress,
+                    **self._engine_options()
                 )
                 log.info("Движок создан: %s", self.engine.describe())
             return self.engine
+
+    def _engine_progress(self, pct: int, msg: str) -> None:
+        self._post("status", f"Загрузка модели Sherpa: {pct}% ({msg})")
 
     def _engine_options(self) -> dict:
         c = self.config
