@@ -11,6 +11,10 @@
 """
 from __future__ import annotations
 
+import logging
+
+log = logging.getLogger(__name__)
+
 import os
 import queue
 import subprocess
@@ -1296,7 +1300,9 @@ class SettingsDialog(tk.Toplevel):
             messagebox.showwarning("Настройки", str(exc), parent=self)
             return
 
+        log.info("Настройки: вызываю apply_settings…")
         self.controller.apply_settings(replace(self._config, **updates))
+        log.info("Настройки: apply_settings вернулся, закрываю диалог")
         self.destroy()
 
     @staticmethod

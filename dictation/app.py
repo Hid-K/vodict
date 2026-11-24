@@ -616,16 +616,19 @@ class DictationController:
         )
 
         self.config = new_config
+        log.info("apply: конфиг обновлён")
         if save:
             try:
                 new_config.save()
             except Exception as exc:
                 self._post("error", f"Не удалось сохранить конфиг: {exc}")
 
+        log.info("apply: прокси-этап")
         if proxy_changed:
             apply_proxy_env(new_config)
             log.info("Прокси применён: %s", new_config.proxy_url or "выключен")
 
+        log.info("apply: этап микрофона")
         if mic_changed:
             self.recorder.device = new_config.microphone or None
             self.recorder.requested_rate = new_config.sample_rate
@@ -635,8 +638,10 @@ class DictationController:
         if history_changed:
             self.history = (HistoryStore(new_config.history_dir or None)
                             if new_config.history_enabled else None)
+        log.info("apply: inserter")
         self.inserter = create_inserter(new_config, self.focus, self.support)
 
+        log.info("apply: этап движка (warmup уходит в фон)")
         if engine_changed:
             with self._engine_lock:
                 old_engine, self.engine = self.engine, None
@@ -646,6 +651,7 @@ class DictationController:
                 except Exception:
                     pass
             self.warmup_engine_async()
+        log.info("apply: этап хоткея")
         if hotkey_changed:
             self.hotkey.stop()
             self.hotkey = HotkeyListener(
@@ -656,6 +662,7 @@ class DictationController:
                 self.hotkey.start()
             except Exception as exc:
                 self._post("error", f"Горячая клавиша не запустилась: {exc}")
+        log.info("apply: готово")
         self._post("refresh")
         self._post("status", "Настройки сохранены")
         log.info("Настройки применены: engine=%s model=%s hotkey=%s",
