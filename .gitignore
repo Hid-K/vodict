@@ -23,3 +23,5 @@ pip-req-build-*/
 
 pip-metadata-*/
 pip-unpack-*/
+
+.pipcache/
